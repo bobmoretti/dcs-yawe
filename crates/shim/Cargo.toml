@@ -10,4 +10,5 @@ crate-type = ["cdylib"]
 [dependencies]
 config = {path = "../config"}
 libloading = "0.8.0"
+ouroboros = "0.15"
 mlua = {version = "0.8", default-features = false, features = ["lua51", "module", "serialize"]}
