@@ -1,0 +1,13 @@
+[package]
+edition = "2021"
+name = "yawe"
+version = "0.1.0"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+mlua = {version = "0.8", default-features = false, features = ["lua51", "module", "serialize"]}
+serde = {version = "1.0.160", features = ["derive"]}
