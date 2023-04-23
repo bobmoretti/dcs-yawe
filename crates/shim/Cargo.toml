@@ -8,7 +8,6 @@ version = "0.1.0"
 crate-type = ["cdylib"]
 
 [dependencies]
-#camino = "1.1"
 config = {path = "../config"}
 mlua = {version = "0.8", default-features = false, features = ["lua51", "module", "serialize"]}
 windows = {version = "0.48", features = ["Win32_System_LibraryLoader", "Win32_Foundation"]}
