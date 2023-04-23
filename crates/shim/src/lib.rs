@@ -82,7 +82,7 @@ pub fn on_frame(lua: &Lua, _: ()) -> LuaResult<i32> {
 }
 
 #[mlua::lua_module]
-pub fn yawe(lua: &Lua) -> LuaResult<LuaTable> {
+pub fn yawe_shim(lua: &Lua) -> LuaResult<LuaTable> {
     let exports = lua.create_table()?;
     exports.set("start", lua.create_function(start)?)?;
     exports.set("on_frame", lua.create_function(on_frame)?)?;

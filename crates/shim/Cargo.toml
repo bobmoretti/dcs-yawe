@@ -1,6 +1,6 @@
 [package]
 edition = "2021"
-name = "yawe-shim"
+name = "yawe_shim"
 version = "0.1.0"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -10,5 +10,5 @@ crate-type = ["cdylib"]
 [dependencies]
 #camino = "1.1"
 config = {path = "../config"}
-windows = { version = "0.48", features = ["Win32_System_LibraryLoader", "Win32_Foundation"]}
 mlua = {version = "0.8", default-features = false, features = ["lua51", "module", "serialize"]}
+windows = {version = "0.48", features = ["Win32_System_LibraryLoader", "Win32_Foundation"]}

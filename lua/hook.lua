@@ -34,7 +34,7 @@ local function onMissionLoadEnd()
     end
     writeLog(log.INFO, "End of Yawe config")
 
-    local yawe_lib = require("yawe-shim")
+    local yawe_lib = require("yawe_shim")
     if yawe_lib then
         writeLog(log.INFO, "Loaded yawe library from hook")
         yawe_lib.start(yawe_config)
@@ -61,6 +61,9 @@ do
     end
 
     function yaweCallbacks.onSimulationFrame()
+        if not YAWE.lib then
+            return
+        end
         YAWE.lib.on_frame_begin()
     end
 

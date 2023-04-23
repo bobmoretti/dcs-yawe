@@ -9,5 +9,15 @@ version = "0.1.0"
 crate-type = ["cdylib"]
 
 [dependencies]
+config = {path = "../config"}
+eframe = {version = "0.21.3", features = ["wgpu"]}
+egui = "0.21.0"
+egui-wgpu = "0.21.0"
+fern = {version = "^0.6.1", features = ["colored"]}
+log = "^0.4.17"
+log-panics = {version = "2", features = ["with-backtrace"]}
 mlua = {version = "0.8", default-features = false, features = ["lua51", "module", "serialize"]}
 serde = {version = "1.0.160", features = ["derive"]}
+wgpu = {version = "0.16.0"}
+winit = "0.28.3"
+
