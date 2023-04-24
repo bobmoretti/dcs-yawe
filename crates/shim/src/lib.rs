@@ -49,15 +49,14 @@ fn load_library(p: &Path) -> windows::core::Result<HMODULE> {
 #[no_mangle]
 pub fn start(lua: &Lua, config: config::Config) -> LuaResult<i32> {
     let dll_path = Path::new(config.dll_path.as_str()).join("yawe.dll");
-    unsafe {
-        let lib = load_library(&dll_path).unwrap();
-        LIB_STATE = Some(LibState {
-            lib: lib,
-            start: load_export(lib, b"start"),
-            stop: load_export(lib, b"stop"),
-            on_frame: load_export(lib, b"on_frame"),
-        });
-    }
+    let lib = load_library(&dll_path).unwrap();
+    let ls = Some(LibState {
+        lib: lib,
+        start: load_export(lib, b"start"),
+        stop: load_export(lib, b"stop"),
+        on_frame: load_export(lib, b"on_frame"),
+    });
+    unsafe { LIB_STATE = ls };
 
     let start = unsafe { &LIB_STATE.as_ref().unwrap().start };
     let result = start(&lua, config);
