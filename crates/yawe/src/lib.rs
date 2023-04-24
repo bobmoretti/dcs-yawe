@@ -1,4 +1,4 @@
-use mlua::prelude::{LuaFunction, LuaResult, LuaTable};
+use mlua::prelude::{LuaFunction, LuaTable};
 use mlua::Lua;
 use std::thread::JoinHandle;
 mod app;
@@ -19,25 +19,25 @@ fn get_writedir(lua: &Lua) -> String {
 }
 
 #[no_mangle]
-pub fn start(lua: &Lua, mut config: config::Config) -> LuaResult<i32> {
+pub fn start(lua: &Lua, mut config: config::Config) -> i32 {
     config.write_dir = get_writedir(lua);
     logging::init(&config);
     let main_thread = std::thread::spawn(|| app::entry());
     unsafe {
         LIB_STATE = Some(LibState { main_thread });
     }
-    Ok(0)
+    0
 }
 
 #[no_mangle]
-pub fn stop(_lua: &Lua) -> LuaResult<i32> {
+pub fn stop(_lua: &Lua) -> i32 {
     unsafe {
         LIB_STATE = None;
     }
-    Ok(0)
+    0
 }
 
 #[no_mangle]
-pub fn on_frame(_lua: &Lua) -> LuaResult<i32> {
-    Ok(0)
+pub fn on_frame(_lua: &Lua) -> i32 {
+    0
 }
