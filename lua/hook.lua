@@ -64,7 +64,7 @@ do
         if not YAWE.lib then
             return
         end
-        YAWE.lib.on_frame_begin()
+        YAWE.lib.on_frame()
     end
 
     function yaweCallbacks.onPlayerConnect(id)
