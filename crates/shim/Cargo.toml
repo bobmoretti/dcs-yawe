@@ -9,5 +9,8 @@ crate-type = ["cdylib"]
 
 [dependencies]
 config = {path = "../config"}
+log = "0.4.17"
+log-panics = {version = "2", features = ["with-backtrace"]}
 mlua = {version = "0.8", default-features = false, features = ["lua51", "module", "serialize"]}
+simple-logging = "2.0.2"
 windows = {version = "0.48", features = ["Win32_System_LibraryLoader", "Win32_Foundation"]}

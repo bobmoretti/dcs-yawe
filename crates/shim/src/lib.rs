@@ -1,3 +1,4 @@
+use log::LevelFilter;
 use mlua::prelude::{LuaResult, LuaTable};
 use mlua::Lua;
 use std::os::windows::ffi::OsStrExt;
@@ -46,8 +47,18 @@ fn load_library(p: &Path) -> windows::core::Result<HMODULE> {
     unsafe { LoadLibraryW(PCWSTR(wide_path.as_ptr())) }
 }
 
+fn setup_logging(write_dir: &str) {
+    let logdir = Path::new(write_dir).join("Logs").join("Yawe");
+    std::fs::create_dir_all(&logdir).expect("Unable to create log file");
+    let p = logdir.join("shim.log");
+    simple_logging::log_to_file(p.as_os_str(), LevelFilter::Info)
+        .expect("Unable to create log file");
+}
+
 #[no_mangle]
 pub fn start(lua: &Lua, config: config::Config) -> LuaResult<i32> {
+    setup_logging(&config.write_dir);
+    log::info!("Log file created.");
     let dll_path = Path::new(config.dll_path.as_str()).join("yawe.dll");
     let lib = load_library(&dll_path).unwrap();
     let ls = Some(LibState {
@@ -67,10 +78,12 @@ pub fn start(lua: &Lua, config: config::Config) -> LuaResult<i32> {
 #[no_mangle]
 pub fn stop(lua: &Lua, _: ()) -> LuaResult<i32> {
     let stop = unsafe { &LIB_STATE.as_ref().unwrap().stop };
-    let result = stop(&lua);
-    unsafe { FreeLibrary(LIB_STATE.as_ref().unwrap().lib) };
+    let stop_result = stop(&lua);
+    log::info!("Stopping main library returned {:?}", stop_result);
+    let free_result = unsafe { FreeLibrary(LIB_STATE.as_ref().unwrap().lib) };
+    log::info!("Freeing library result: {:?}", free_result);
     unsafe { LIB_STATE = None };
-    Ok(result)
+    Ok(free_result.as_bool().into())
 }
 
 #[no_mangle]
