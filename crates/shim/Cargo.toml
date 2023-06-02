@@ -14,11 +14,3 @@ log-panics = {version = "2", features = ["with-backtrace"]}
 mlua = {version = "0.8", default-features = false, features = ["lua51", "module", "serialize"]}
 simple-logging = "2.0.2"
 windows = {version = "0.48", features = ["Win32_System_LibraryLoader", "Win32_Foundation"]}
-
-[profile.dev]
-debug = true
-opt-level = 1
-
-[profile.release]
-debug = true
-opt-level = 3

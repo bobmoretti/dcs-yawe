@@ -9,11 +9,3 @@ version = "0.1.0"
 [dependencies]
 mlua = {version = "0.8", default-features = false, features = ["lua51", "module", "serialize"]}
 serde = {version = "1.0.160", features = ["derive"]}
-
-[profile.dev]
-debug = true
-opt-level = 1
-
-[profile.release]
-debug = true
-opt-level = 3

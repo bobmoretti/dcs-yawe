@@ -6,6 +6,7 @@ use winit::platform::windows::EventLoopBuilderExtWindows;
 pub struct Handle {
     tx: Sender<Message>,
     thread: Option<std::thread::JoinHandle<()>>,
+    context: egui::Context,
 }
 
 struct Gui {
@@ -26,12 +27,15 @@ impl Handle {
     pub fn new() -> Self {
         let (tx, rx) = mpsc::channel::<Message>();
         let tx_clone = tx.clone();
+        let context = egui::Context::default();
+        let context_clone = context.clone();
         let thread = std::thread::spawn(move || {
-            do_gui(rx);
+            do_gui(rx, context);
         });
         Handle {
             tx: tx_clone,
             thread: Some(thread),
+            context: context_clone,
         }
     }
 
@@ -58,7 +62,7 @@ impl eframe::App for Gui {
     }
 }
 
-fn do_gui(rx: Receiver<Message>) {
+fn do_gui(rx: Receiver<Message>, context: egui::Context) {
     log::info!("Starting gui");
     let mut native_options = eframe::NativeOptions::default();
     native_options.event_loop_builder = Some(Box::new(|builder| {
@@ -66,6 +70,7 @@ fn do_gui(rx: Receiver<Message>) {
         builder.with_any_thread(true);
     }));
     native_options.renderer = eframe::Renderer::Wgpu;
+    native_options.context = Some(context);
     log::info!("Spawning GUI thread");
 
     let gui = Gui::new(rx);
