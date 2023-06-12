@@ -1,3 +1,4 @@
+use crate::dcs;
 use std::sync::mpsc::{self, Receiver, SendError, Sender};
 use winit::platform::windows::EventLoopBuilderExtWindows;
 
@@ -11,21 +12,28 @@ pub struct Handle {
 
 struct Gui {
     rx: Receiver<Message>,
-    aircraft_name: String,
+    aircraft_name: &'static str,
 }
 
 impl Gui {
     pub fn new(rx: Receiver<Message>) -> Self {
         Self {
             rx: rx,
-            aircraft_name: String::from(""),
+            aircraft_name: "",
         }
+    }
+}
+
+fn aircraft_display_name(kind: dcs::AircraftType) -> &'static str {
+    match kind {
+        dcs::AircraftType::F_16C_50 => "F-16C block 50",
+        dcs::AircraftType::UNKNOWN => "",
     }
 }
 
 pub enum Message {
     Stop,
-    UpdateName(String),
+    UpdateOwnship(dcs::AircraftType),
 }
 
 impl Handle {
@@ -44,8 +52,8 @@ impl Handle {
         }
     }
 
-    pub fn set_ownship_name(&self, name: String) -> Result<(), SendError<Message>> {
-        self.tx.send(Message::UpdateName(name))?;
+    pub fn set_ownship_type(&self, kind: dcs::AircraftType) -> Result<(), SendError<Message>> {
+        self.tx.send(Message::UpdateOwnship(kind))?;
         self.context.request_repaint();
         Ok(())
     }
@@ -78,7 +86,7 @@ impl eframe::App for Gui {
                     frame.close();
                     return;
                 }
-                Message::UpdateName(name) => self.aircraft_name = name,
+                Message::UpdateOwnship(kind) => self.aircraft_name = aircraft_display_name(kind),
             }
         }
 
@@ -86,7 +94,7 @@ impl eframe::App for Gui {
             ui.heading("DCS YAWE");
             ui.horizontal(|ui| {
                 ui.label("Aircraft type:");
-                ui.label(self.aircraft_name.as_str())
+                ui.label(self.aircraft_name);
             });
         });
     }
