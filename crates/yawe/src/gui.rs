@@ -1,4 +1,4 @@
-use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::mpsc::{self, Receiver, SendError, Sender};
 use winit::platform::windows::EventLoopBuilderExtWindows;
 
 // Publicly-facing handle to GUI thread
@@ -11,16 +11,21 @@ pub struct Handle {
 
 struct Gui {
     rx: Receiver<Message>,
+    aircraft_name: String,
 }
 
 impl Gui {
     pub fn new(rx: Receiver<Message>) -> Self {
-        Self { rx }
+        Self {
+            rx: rx,
+            aircraft_name: String::from(""),
+        }
     }
 }
 
-enum Message {
+pub enum Message {
     Stop,
+    UpdateName(String),
 }
 
 impl Handle {
@@ -39,11 +44,26 @@ impl Handle {
         }
     }
 
+    pub fn set_ownship_name(&self, name: String) -> Result<(), SendError<Message>> {
+        self.tx.send(Message::UpdateName(name))?;
+        self.context.request_repaint();
+        Ok(())
+    }
+
     pub fn stop(&mut self) {
+        log::info!("GUI stop called!");
         let tx = &self.tx;
         tx.send(Message::Stop).unwrap_or(());
-        let thread = self.thread.take().unwrap();
-        thread.join().unwrap()
+        self.context.request_repaint();
+
+        if self.thread.is_some() {
+            let thread = self.thread.take().unwrap();
+            thread.join().unwrap();
+        }
+    }
+
+    pub fn is_running(&self) -> bool {
+        self.thread.is_some()
     }
 }
 
@@ -51,13 +71,23 @@ impl eframe::App for Gui {
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
         let msg = self.rx.try_recv();
 
-        if let Ok(Message::Stop) = msg {
-            log::info!("Gui: received a `Stop` message");
-            frame.close();
-            return;
+        if let Ok(m) = msg {
+            match m {
+                Message::Stop => {
+                    log::info!("Gui: received a `Stop` message");
+                    frame.close();
+                    return;
+                }
+                Message::UpdateName(name) => self.aircraft_name = name,
+            }
         }
+
         egui::CentralPanel::default().show(ctx, |ui| {
-            ui.heading("My egui Application");
+            ui.heading("DCS YAWE");
+            ui.horizontal(|ui| {
+                ui.label("Aircraft type:");
+                ui.label(self.aircraft_name.as_str())
+            });
         });
     }
 }

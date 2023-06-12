@@ -2,6 +2,7 @@ use mlua::prelude::{LuaFunction, LuaTable};
 use mlua::Lua;
 use std::string::String;
 mod app;
+mod dcs;
 mod gui;
 mod logging;
 
@@ -46,6 +47,7 @@ pub fn stop(_lua: &Lua) -> i32 {
 }
 
 #[no_mangle]
-pub fn on_frame(_lua: &Lua) -> i32 {
+pub fn on_frame(lua: &Lua) -> i32 {
+    get_lib_state().main_app.on_frame(&lua);
     0
 }

@@ -1,10 +1,13 @@
+use crate::dcs;
 use crate::gui;
+use mlua::Lua;
 use std::thread::JoinHandle;
 
 #[derive(Debug)]
 pub struct App {
     thread: Option<JoinHandle<()>>,
     gui: gui::Handle,
+    ownship_type: String,
 }
 
 impl App {
@@ -16,6 +19,7 @@ impl App {
         let me = Self {
             thread: Some(std::thread::spawn(|| app_thread_entry())),
             gui: gui,
+            ownship_type: String::from(""),
         };
         me
     }
@@ -25,6 +29,19 @@ impl App {
         self.gui.stop();
         thread_finish.unwrap().join().unwrap();
         log::info!("Main thread stopped");
+    }
+
+    pub fn on_frame(&mut self, lua: &Lua) {
+        let ownship_type = dcs::get_ownship_type(lua);
+        if self.ownship_type != ownship_type {
+            self.ownship_type = ownship_type.clone();
+            if self.gui.is_running() {
+                let result = self.gui.set_ownship_name(ownship_type);
+                if result.is_err() {
+                    self.gui.stop();
+                }
+            }
+        }
     }
 }
 
