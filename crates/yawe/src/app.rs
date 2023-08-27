@@ -7,7 +7,7 @@ use std::thread::JoinHandle;
 pub struct App {
     thread: Option<JoinHandle<()>>,
     gui: gui::Handle,
-    ownship_type: dcs::AircraftType,
+    ownship_type: dcs::AircraftId,
 }
 
 impl App {
@@ -19,7 +19,7 @@ impl App {
         let me = Self {
             thread: Some(std::thread::spawn(|| app_thread_entry())),
             gui: gui,
-            ownship_type: dcs::AircraftType::UNKNOWN,
+            ownship_type: dcs::AircraftId::Unknown(String::from("")),
         };
         me
     }
@@ -35,7 +35,7 @@ impl App {
         let ownship_type = dcs::get_ownship_type(lua);
         if self.ownship_type != ownship_type {
             log::info!("Got new aircraft type {:?}", ownship_type);
-            self.ownship_type = ownship_type;
+            self.ownship_type = ownship_type.clone();
             if self.gui.is_running() {
                 let result = self.gui.set_ownship_type(ownship_type);
                 if result.is_err() {

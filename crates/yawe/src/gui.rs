@@ -1,6 +1,8 @@
 use crate::dcs;
+use egui_backend::{egui, BackendConfig, GfxBackend, UserApp, WindowBackend};
+use egui_render_glow::GlowBackend;
+use egui_window_glfw_passthrough::GlfwBackend;
 use std::sync::mpsc::{self, Receiver, SendError, Sender};
-use winit::platform::windows::EventLoopBuilderExtWindows;
 
 // Publicly-facing handle to GUI thread
 #[derive(Debug)]
@@ -13,27 +15,61 @@ pub struct Handle {
 struct Gui {
     rx: Receiver<Message>,
     aircraft_name: &'static str,
+    pub egui_context: egui::Context,
+    pub glow_backend: GlowBackend,
+    pub glfw_backend: GlfwBackend,
 }
 
 impl Gui {
-    pub fn new(rx: Receiver<Message>) -> Self {
+    pub fn new(rx: Receiver<Message>, context: egui::Context) -> Self {
+        let mut glfw_backend = GlfwBackend::new(Default::default(), BackendConfig::default());
+        // creating gfx backend. It uses Window backend to load things like fn pointers
+        // or window handle for swapchain etc.. behind the scenes.
+        let glow_backend = GlowBackend::new(&mut glfw_backend, Default::default());
         Self {
             rx: rx,
             aircraft_name: "",
+            glfw_backend: glfw_backend,
+            glow_backend: glow_backend,
+            egui_context: context,
         }
+    }
+
+    fn close(&mut self) {
+        self.glfw_backend.window.set_should_close(true);
     }
 }
 
-fn aircraft_display_name(kind: dcs::AircraftType) -> &'static str {
+fn aircraft_display_name(kind: dcs::AircraftId) -> &'static str {
     match kind {
-        dcs::AircraftType::F_16C_50 => "F-16C block 50",
-        dcs::AircraftType::UNKNOWN => "",
+        dcs::AircraftId::F_16C_50 => "F-16C block 50",
+        dcs::AircraftId::A_10C => "A-10C",
+        dcs::AircraftId::A_10C_2 => "A-10C II",
+        dcs::AircraftId::AH_64D_BLK_II => "AH-64D Apache",
+        dcs::AircraftId::AJS37 => "AJS37 Viggen",
+        dcs::AircraftId::AV8BNA => "AV8BNA Harrier",
+        dcs::AircraftId::F_14B => "F-14B Tomcat",
+        dcs::AircraftId::F_15ESE => "F-15E Strike Eagle",
+        dcs::AircraftId::F_15ESE_WSO => "F-15E Strike Eagle (WSO)",
+        dcs::AircraftId::FA_18C_hornet => "F/A-18C Hornet",
+        dcs::AircraftId::M_2000C => "Mirage 2000C",
+        dcs::AircraftId::Mi_24P => "Mi-24P \"Hind E\"",
+        dcs::AircraftId::Mi_8MT => "Mi-8MT \"Hip\"",
+        dcs::AircraftId::Mi_8MT_Copilot => "Mi-8MT \"Hip\" (Copilot)",
+        dcs::AircraftId::Mi_8MT_FO => "Mi-8MT \"Hip\" (First Officer)",
+        dcs::AircraftId::MiG_21Bis => "MiG-21Bis",
+        dcs::AircraftId::SA342L => "SA342L Gazelle",
+        dcs::AircraftId::Su_25 => "Su-25 \"Frogfoot\"",
+        dcs::AircraftId::Su_25T => "Su-25T \"Frogfoot\"",
+        dcs::AircraftId::UH_1H => "UH-1H Huey",
+        // TODO: this is a hack
+        dcs::AircraftId::Unknown(s) => s.leak(),
     }
 }
 
 pub enum Message {
     Stop,
-    UpdateOwnship(dcs::AircraftType),
+    UpdateOwnship(dcs::AircraftId),
 }
 
 impl Handle {
@@ -52,7 +88,7 @@ impl Handle {
         }
     }
 
-    pub fn set_ownship_type(&self, kind: dcs::AircraftType) -> Result<(), SendError<Message>> {
+    pub fn set_ownship_type(&self, kind: dcs::AircraftId) -> Result<(), SendError<Message>> {
         self.tx.send(Message::UpdateOwnship(kind))?;
         self.context.request_repaint();
         Ok(())
@@ -75,22 +111,40 @@ impl Handle {
     }
 }
 
-impl eframe::App for Gui {
-    fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
-        let msg = self.rx.try_recv();
+impl UserApp for Gui {
+    type UserGfxBackend = GlowBackend;
+    type UserWindowBackend = GlfwBackend;
+    fn get_all(
+        &mut self,
+    ) -> (
+        &mut Self::UserWindowBackend,
+        &mut Self::UserGfxBackend,
+        &egui::Context,
+    ) {
+        (
+            &mut self.glfw_backend,
+            &mut self.glow_backend,
+            &self.egui_context,
+        )
+    }
 
+    fn gui_run(&mut self) {
+        let ctx = self.egui_context.clone();
+        self.glfw_backend.window.set_floating(true);
+
+        let msg = self.rx.try_recv();
         if let Ok(m) = msg {
             match m {
                 Message::Stop => {
                     log::info!("Gui: received a `Stop` message");
-                    frame.close();
+                    self.close();
                     return;
                 }
                 Message::UpdateOwnship(kind) => self.aircraft_name = aircraft_display_name(kind),
             }
         }
 
-        egui::CentralPanel::default().show(ctx, |ui| {
+        egui::CentralPanel::default().show(&ctx, |ui| {
             ui.heading("DCS YAWE");
             ui.horizontal(|ui| {
                 ui.label("Aircraft type:");
@@ -102,23 +156,8 @@ impl eframe::App for Gui {
 
 fn do_gui(rx: Receiver<Message>, context: egui::Context) {
     log::info!("Starting gui");
-    let mut native_options = eframe::NativeOptions::default();
-    native_options.event_loop_builder = Some(Box::new(|builder| {
-        log::debug!("Calling eframe event loop hook");
-        builder.with_any_thread(true);
-    }));
-    native_options.renderer = eframe::Renderer::Wgpu;
-    native_options.context = Some(context);
-    log::info!("Spawning GUI thread");
-
-    let gui = Gui::new(rx);
-
-    eframe::run_native(
-        "DCS Yawe",
-        native_options,
-        Box::new(move |_cc| Box::new(gui)),
-    )
-    .expect("Eframe ran successfully");
+    let gui = Gui::new(rx, context);
+    <Gui as UserApp>::UserWindowBackend::run_event_loop(gui);
 
     log::info!("Gui closed");
 }
