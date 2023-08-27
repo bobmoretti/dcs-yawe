@@ -3,7 +3,7 @@ use mlua::prelude::{LuaResult, LuaTable};
 use mlua::Lua;
 use std::os::windows::ffi::OsStrExt;
 use std::path::Path;
-use windows::Win32::Foundation::{FARPROC, HMODULE};
+use windows::Win32::Foundation::{BOOL, FARPROC, HMODULE};
 use windows::Win32::System::LibraryLoader::{FreeLibrary, GetProcAddress, LoadLibraryW};
 
 struct LibState {
@@ -55,6 +55,13 @@ fn setup_logging(write_dir: &str) {
         .expect("Unable to create log file");
 }
 
+fn close_library() -> BOOL {
+    let free_result = unsafe { FreeLibrary(LIB_STATE.as_ref().unwrap().lib) };
+    log::info!("Freeing library result: {:?}", free_result);
+    unsafe { LIB_STATE = None };
+    free_result
+}
+
 #[no_mangle]
 pub fn start(lua: &Lua, config: config::Config) -> LuaResult<i32> {
     setup_logging(&config.write_dir);
@@ -80,16 +87,22 @@ pub fn stop(lua: &Lua, _: ()) -> LuaResult<i32> {
     let stop = unsafe { &LIB_STATE.as_ref().unwrap().stop };
     let stop_result = stop(&lua);
     log::info!("Stopping main library returned {:?}", stop_result);
-    let free_result = unsafe { FreeLibrary(LIB_STATE.as_ref().unwrap().lib) };
-    log::info!("Freeing library result: {:?}", free_result);
-    unsafe { LIB_STATE = None };
+    let free_result = close_library();
     Ok(free_result.as_bool().into())
 }
 
 #[no_mangle]
 pub fn on_frame(lua: &Lua, _: ()) -> LuaResult<i32> {
-    let on_frame = unsafe { &LIB_STATE.as_ref().unwrap().on_frame };
+    let maybe_lib_state = unsafe { &LIB_STATE.as_ref() };
+    if let None = &maybe_lib_state {
+        return Ok(-1);
+    }
+    let on_frame = &maybe_lib_state.unwrap().on_frame;
     let result = on_frame(&lua);
+    if result < 0 {
+        log::info!("Development: user asked to close library\n");
+        close_library();
+    }
     Ok(result)
 }
 

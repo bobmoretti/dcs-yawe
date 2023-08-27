@@ -48,6 +48,5 @@ pub fn stop(_lua: &Lua) -> i32 {
 
 #[no_mangle]
 pub fn on_frame(lua: &Lua) -> i32 {
-    get_lib_state().main_app.on_frame(&lua);
-    0
+    get_lib_state().main_app.on_frame(&lua)
 }

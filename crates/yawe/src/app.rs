@@ -31,7 +31,7 @@ impl App {
         log::info!("Main thread stopped");
     }
 
-    pub fn on_frame(&mut self, lua: &Lua) {
+    pub fn on_frame(&mut self, lua: &Lua) -> i32 {
         let ownship_type = dcs::get_ownship_type(lua);
         if self.ownship_type != ownship_type {
             log::info!("Got new aircraft type {:?}", ownship_type);
@@ -42,6 +42,11 @@ impl App {
                     self.gui.stop();
                 }
             }
+        }
+        if self.gui.is_running() {
+            0
+        } else {
+            -1
         }
     }
 }

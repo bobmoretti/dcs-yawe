@@ -107,7 +107,10 @@ impl Handle {
     }
 
     pub fn is_running(&self) -> bool {
-        self.thread.is_some()
+        match &self.thread {
+            Some(t) => !t.is_finished(),
+            None => false,
+        }
     }
 }
 
