@@ -1,6 +1,6 @@
 use std::str::FromStr;
 
-use mlua::prelude::{LuaFunction, LuaTable};
+use mlua::prelude::{LuaFunction, LuaResult, LuaTable};
 use mlua::Lua;
 
 #[derive(PartialEq, Debug, Clone)]
@@ -55,10 +55,48 @@ fn str_to_ship_enum(name: &str) -> AircraftId {
     }
 }
 
-pub fn get_ownship_type(lua: &Lua) -> AircraftId {
-    let export: LuaTable = lua.globals().get("Export").unwrap();
-    let get_self_data: LuaFunction = export.get("LoGetSelfData").unwrap();
-    let self_data: LuaTable = get_self_data.call(()).unwrap();
-    let s: String = self_data.get("Name").unwrap();
-    str_to_ship_enum(s.as_str())
+pub fn get_ownship_type(lua: &Lua) -> LuaResult<AircraftId> {
+    let export: LuaTable = lua.globals().get("Export")?;
+    let get_self_data: LuaFunction = export.get("LoGetSelfData")?;
+    let self_data: LuaTable = get_self_data.call(())?;
+    let s: String = self_data.get("Name")?;
+    Ok(str_to_ship_enum(s.as_str()))
+}
+
+fn get_cockpit_device(lua: &Lua, device_id: i32) -> LuaResult<LuaTable> {
+    let export: LuaTable = lua.globals().get("Export")?;
+    let get_device: LuaResult<LuaFunction> = export.get("GetDevice");
+    if get_device.is_err() {
+        log::info!("Failed to get device {device_id}");
+    }
+    get_device.unwrap().call(device_id)
+}
+
+pub fn perform_click(lua: &Lua, device_id: i32, command: i32, value: f64) -> LuaResult<()> {
+    let device: LuaTable = get_cockpit_device(lua, device_id)?;
+    let perform_click: LuaFunction = device.get("performClickableAction")?;
+    perform_click.call((command, value))
+}
+
+pub fn get_switch_state(lua: &Lua, device_id: i32, command: i32) -> LuaResult<f64> {
+    let device: LuaTable = get_cockpit_device(lua, device_id)?;
+    let get_value: LuaResult<LuaFunction> = device.get("get_argument_value");
+    if let Err(e) = get_value {
+        log::warn!(
+            "Could not find function get_argument_value, result is {:?}",
+            e
+        );
+        return Err(e);
+    }
+    get_value.unwrap().call((device, command))
+}
+
+pub fn set_command(lua: &Lua, command: i32, value: f64) -> LuaResult<f64> {
+    let export: LuaTable = lua.globals().get("Export")?;
+    let set_command: LuaResult<LuaFunction> = export.get("LoGetCommand");
+    if let Err(e) = set_command {
+        log::warn!("Could not find function LoGetCommand, result is {:?}", e);
+        return Err(e);
+    }
+    set_command.unwrap().call((command, value))
 }

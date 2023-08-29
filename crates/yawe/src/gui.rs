@@ -2,6 +2,8 @@ use crate::dcs;
 use egui_backend::{egui, BackendConfig, GfxBackend, UserApp, WindowBackend};
 use egui_render_glow::GlowBackend;
 use egui_window_glfw_passthrough::GlfwBackend;
+use mlua::Lua;
+use offload::TaskSender;
 use std::sync::mpsc::{self, Receiver, SendError, Sender};
 
 // Publicly-facing handle to GUI thread
@@ -14,6 +16,7 @@ pub struct Handle {
 
 struct Gui {
     rx: Receiver<Message>,
+    tx: TaskSender<Lua>,
     aircraft_name: &'static str,
     pub egui_context: egui::Context,
     pub glow_backend: GlowBackend,
@@ -21,13 +24,14 @@ struct Gui {
 }
 
 impl Gui {
-    pub fn new(rx: Receiver<Message>, context: egui::Context) -> Self {
+    pub fn new(rx: Receiver<Message>, tx: TaskSender<Lua>, context: egui::Context) -> Self {
         let mut glfw_backend = GlfwBackend::new(Default::default(), BackendConfig::default());
         // creating gfx backend. It uses Window backend to load things like fn pointers
         // or window handle for swapchain etc.. behind the scenes.
         let glow_backend = GlowBackend::new(&mut glfw_backend, Default::default());
         Self {
             rx: rx,
+            tx: tx,
             aircraft_name: "",
             glfw_backend: glfw_backend,
             glow_backend: glow_backend,
@@ -73,13 +77,13 @@ pub enum Message {
 }
 
 impl Handle {
-    pub fn new() -> Self {
+    pub fn new(tx_to_dcs: TaskSender<Lua>) -> Self {
         let (tx, rx) = mpsc::channel::<Message>();
         let tx_clone = tx.clone();
         let context = egui::Context::default();
         let context_clone = context.clone();
         let thread = std::thread::spawn(move || {
-            do_gui(rx, context);
+            do_gui(rx, tx_to_dcs, context);
         });
         Handle {
             tx: tx_clone,
@@ -153,14 +157,26 @@ impl UserApp for Gui {
                 ui.label("Aircraft type:");
                 ui.label(self.aircraft_name);
             });
+            if (ui.button("Start")).clicked() {
+                let x = self.tx.send(|lua| start_jet(&lua)).wait();
+            }
         });
     }
 }
 
-fn do_gui(rx: Receiver<Message>, context: egui::Context) {
+fn do_gui(rx: Receiver<Message>, tx: TaskSender<Lua>, context: egui::Context) {
     log::info!("Starting gui");
-    let gui = Gui::new(rx, context);
+    let gui = Gui::new(rx, tx, context);
     <Gui as UserApp>::UserWindowBackend::run_event_loop(gui);
 
     log::info!("Gui closed");
+}
+
+fn start_jet(lua: &Lua) {
+    let value = dcs::get_switch_state(lua, 0, 50);
+    if let Ok(v) = value {
+        log::info!("RPM state: {v}");
+    } else {
+        log::warn!("Failed to read state of device with {:?}", value);
+    }
 }
