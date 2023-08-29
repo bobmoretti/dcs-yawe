@@ -2,8 +2,7 @@ use crate::dcs;
 use crate::gui;
 use mlua::Lua;
 use offload::{PackagedTask, TaskSender};
-use std::sync::mpsc::Receiver;
-use std::sync::mpsc::TryRecvError;
+use std::sync::mpsc::{channel, Receiver, Sender, TryRecvError};
 use std::thread::JoinHandle;
 
 #[derive(Debug)]
@@ -14,16 +13,29 @@ pub struct App {
     dcs_worker_rx: Receiver<PackagedTask<Lua>>,
 }
 
+pub enum AppMessage {
+    StartAircraft,
+}
+
+pub enum AppReply {
+    StartFinished,
+}
+
 impl App {
     // Start the main application (scoped) thread, return an interface handle to
     // allow the outside world to talk to it.
     pub fn new() -> Self {
         // create a new gui handle
         let (dcs_worker_tx, dcs_worker_rx) = TaskSender::new();
-        let gui = gui::Handle::new(dcs_worker_tx);
+        let (tx_to_app, rx_from_gui) = channel::<AppMessage>();
+        let (tx_to_gui, rx_from_app) = channel::<AppReply>();
+
+        let gui = gui::Handle::new(tx_to_app);
 
         let me = Self {
-            thread: Some(std::thread::spawn(|| app_thread_entry())),
+            thread: Some(std::thread::spawn(|| {
+                app_thread_entry(dcs_worker_tx, rx_from_gui, tx_to_gui)
+            })),
             gui: gui,
             ownship_type: dcs::AircraftId::Unknown(String::from("")),
             dcs_worker_rx,
@@ -69,5 +81,27 @@ impl App {
         }
     }
 }
+fn app_thread_entry(
+    sender_to_dcs: TaskSender<Lua>,
+    rx_from_gui: Receiver<AppMessage>,
+    tx_to_gui: Sender<AppReply>,
+) -> ! {
+    loop {
+        let mesg = rx_from_gui.recv();
+        if mesg.is_err() {
+            continue;
+        }
+        match mesg.as_ref().unwrap() {
+            AppMessage::StartAircraft => sender_to_dcs.send(|lua| start_jet(&lua)).wait().unwrap(),
+        };
+    }
+}
 
-fn app_thread_entry() {}
+fn start_jet(lua: &Lua) {
+    let value = dcs::get_switch_state(lua, 0, 50);
+    if let Ok(v) = value {
+        log::info!("RPM state: {v}");
+    } else {
+        log::warn!("Failed to read state of device with {:?}", value);
+    }
+}
