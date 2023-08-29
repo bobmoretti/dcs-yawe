@@ -19,6 +19,7 @@ libc = "0.2.142"
 log = "^0.4.17"
 log-panics = {git = "https://github.com/bobmoretti/rust-log-panics.git/", features = ["with-backtrace"]}
 mlua = {version = "0.8", default-features = false, features = ["lua51", "module", "serialize"]}
+offload = {path = "../offload"}
 serde = {version = "1.0.160", features = ["derive"]}
 thread-id = "4.0.0"
 wgpu = {version = "0.16.0"}

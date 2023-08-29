@@ -1194,6 +1194,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "offload"
+version = "0.1.0"
+
+[[package]]
 name = "once_cell"
 version = "1.18.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2216,6 +2220,7 @@ dependencies = [
  "log",
  "log-panics 2.1.0 (git+https://github.com/bobmoretti/rust-log-panics.git/)",
  "mlua",
+ "offload",
  "serde",
  "thread-id 4.2.0",
  "wgpu",
