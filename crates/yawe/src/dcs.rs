@@ -75,7 +75,7 @@ fn get_cockpit_device(lua: &Lua, device_id: i32) -> LuaResult<LuaTable> {
 pub fn perform_click(lua: &Lua, device_id: i32, command: i32, value: f64) -> LuaResult<()> {
     let device: LuaTable = get_cockpit_device(lua, device_id)?;
     let perform_click: LuaFunction = device.get("performClickableAction")?;
-    perform_click.call((command, value))
+    perform_click.call((device, command, value))
 }
 
 pub fn get_switch_state(lua: &Lua, device_id: i32, command: i32) -> LuaResult<f64> {

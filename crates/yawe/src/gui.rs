@@ -3,7 +3,6 @@ use crate::dcs;
 use egui_backend::{egui, BackendConfig, GfxBackend, UserApp, WindowBackend};
 use egui_render_glow::GlowBackend;
 use egui_window_glfw_passthrough::GlfwBackend;
-use mlua::Lua;
 use std::sync::mpsc::{self, Receiver, SendError, Sender};
 
 // Publicly-facing handle to GUI thread
@@ -158,7 +157,7 @@ impl UserApp for Gui {
                 ui.label(self.aircraft_name);
             });
             if (ui.button("Start")).clicked() {
-                let x = self.tx.send(app::AppMessage::StartAircraft);
+                let _ = self.tx.send(app::AppMessage::StartupAircraft);
             }
         });
     }

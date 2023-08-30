@@ -2,23 +2,26 @@ use crate::dcs;
 use crate::gui;
 use mlua::Lua;
 use offload::{PackagedTask, TaskSender};
-use std::sync::mpsc::{channel, Receiver, Sender, TryRecvError};
+use std::sync::mpsc::{channel, Receiver, Sender};
 use std::thread::JoinHandle;
 
 #[derive(Debug)]
 pub struct App {
     thread: Option<JoinHandle<()>>,
+    tx_to_app: Sender<AppMessage>,
     gui: gui::Handle,
     ownship_type: dcs::AircraftId,
     dcs_worker_rx: Receiver<PackagedTask<Lua>>,
 }
 
 pub enum AppMessage {
-    StartAircraft,
+    StartupAircraft,
+    InterruptAircraftStart,
+    StopApp,
 }
 
 pub enum AppReply {
-    StartFinished,
+    StartupComplete,
 }
 
 impl App {
@@ -30,12 +33,13 @@ impl App {
         let (tx_to_app, rx_from_gui) = channel::<AppMessage>();
         let (tx_to_gui, rx_from_app) = channel::<AppReply>();
 
-        let gui = gui::Handle::new(tx_to_app);
+        let gui = gui::Handle::new(tx_to_app.clone());
 
         let me = Self {
             thread: Some(std::thread::spawn(|| {
                 app_thread_entry(dcs_worker_tx, rx_from_gui, tx_to_gui)
             })),
+            tx_to_app: tx_to_app.clone(),
             gui: gui,
             ownship_type: dcs::AircraftId::Unknown(String::from("")),
             dcs_worker_rx,
@@ -44,6 +48,12 @@ impl App {
     }
 
     pub fn stop(&mut self) {
+        if let Err(e) = self.tx_to_app.send(AppMessage::StopApp) {
+            log::warn!(
+                "Warning, could not send Stop message to app thread, error was {:?}",
+                e
+            );
+        };
         let thread_finish = std::mem::take(&mut self.thread);
         self.gui.stop();
         thread_finish.unwrap().join().unwrap();
@@ -67,12 +77,7 @@ impl App {
             }
         }
 
-        if let Err(e) = self.dcs_worker_rx.try_recv().map(|job| job(lua)) {
-            if let TryRecvError::Empty = e {
-            } else {
-                log::warn!("Offload tick failed with error {:?}", e);
-            }
-        }
+        let _ = self.dcs_worker_rx.try_recv().map(|job| job(lua));
 
         if self.gui.is_running() {
             0
@@ -81,18 +86,26 @@ impl App {
         }
     }
 }
+
 fn app_thread_entry(
     sender_to_dcs: TaskSender<Lua>,
     rx_from_gui: Receiver<AppMessage>,
     tx_to_gui: Sender<AppReply>,
-) -> ! {
+) {
     loop {
         let mesg = rx_from_gui.recv();
         if mesg.is_err() {
             continue;
         }
         match mesg.as_ref().unwrap() {
-            AppMessage::StartAircraft => sender_to_dcs.send(|lua| start_jet(&lua)).wait().unwrap(),
+            AppMessage::StartupAircraft => {
+                let send_result = sender_to_dcs.send(|lua| start_jet(&lua)).wait();
+                if let Err(e) = send_result {
+                    log::warn!("Error {:?} sending start message to DCS", e);
+                }
+            }
+            AppMessage::StopApp => return,
+            AppMessage::InterruptAircraftStart => continue,
         };
     }
 }
@@ -103,5 +116,8 @@ fn start_jet(lua: &Lua) {
         log::info!("RPM state: {v}");
     } else {
         log::warn!("Failed to read state of device with {:?}", value);
+    }
+    if let Err(e) = dcs::perform_click(lua, 4, 3010, 1.0) {
+        log::warn!("Failed to perform click, result was {:?}", e);
     }
 }

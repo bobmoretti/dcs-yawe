@@ -84,6 +84,9 @@ pub fn start(lua: &Lua, config: config::Config) -> LuaResult<i32> {
 
 #[no_mangle]
 pub fn stop(lua: &Lua, _: ()) -> LuaResult<i32> {
+    if !unsafe { LIB_STATE.is_some() } {
+        return Ok(-1);
+    }
     let stop = unsafe { &LIB_STATE.as_ref().unwrap().stop };
     let stop_result = stop(&lua);
     log::info!("Stopping main library returned {:?}", stop_result);
