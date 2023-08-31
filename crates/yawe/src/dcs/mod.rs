@@ -1,6 +1,9 @@
+pub mod mig21bis;
+
+use crate::Error;
 use std::str::FromStr;
 
-use mlua::prelude::{LuaFunction, LuaResult, LuaTable};
+use mlua::prelude::{LuaError, LuaFunction, LuaResult, LuaTable};
 use mlua::Lua;
 
 #[derive(PartialEq, Debug, Clone)]
@@ -99,4 +102,39 @@ pub fn set_command(lua: &Lua, command: i32, value: f64) -> LuaResult<f64> {
         return Err(e);
     }
     set_command.unwrap().call((command, value))
+}
+
+pub fn list_cockpit_params(lua: &Lua) -> LuaResult<String> {
+    let list_cockpit_params: LuaResult<LuaFunction> = lua.globals().get("list_cockpit_params");
+    if let Err(e) = list_cockpit_params {
+        log::warn!(
+            "Could not find global function list_cockpit_params, result is {:?}",
+            e
+        );
+        return Err(e);
+    }
+    list_cockpit_params.unwrap().call(())
+}
+
+pub fn get_cockpit_param(lua: &Lua, param_name: &str) -> std::result::Result<f32, Error> {
+    let params = list_cockpit_params(lua).map_err(|e| Error::LuaError(e))?;
+    let pattern = [param_name, ":"].join("");
+
+    let mut ii = 0;
+    for line in params.split("\n") {
+        ii += 1;
+        if line.trim().starts_with(&pattern) {
+            let mut s = line.split(":");
+            s.next();
+            let val = s.next();
+            if let None = val {
+                return Err(Error::ParseError(line.into()));
+            }
+            return Ok(val
+                .unwrap()
+                .parse()
+                .map_err(|_| Error::ParseError(line.into()))?);
+        }
+    }
+    return Err(Error::IndexError);
 }

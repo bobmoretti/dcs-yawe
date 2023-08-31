@@ -11,6 +11,7 @@ struct LibState {
     start: ProcWrapper<extern "C" fn(&Lua, config::Config) -> i32>,
     stop: ProcWrapper<extern "C" fn(&Lua) -> i32>,
     on_frame: ProcWrapper<extern "C" fn(&Lua) -> i32>,
+    on_frame_export: ProcWrapper<extern "C" fn(&Lua) -> i32>,
 }
 
 static mut LIB_STATE: Option<LibState> = None;
@@ -73,6 +74,7 @@ pub fn start(lua: &Lua, config: config::Config) -> LuaResult<i32> {
         start: load_export(lib, b"start"),
         stop: load_export(lib, b"stop"),
         on_frame: load_export(lib, b"on_frame"),
+        on_frame_export: load_export(lib, b"on_frame_export"),
     });
     unsafe { LIB_STATE = ls };
 
@@ -109,11 +111,25 @@ pub fn on_frame(lua: &Lua, _: ()) -> LuaResult<i32> {
     Ok(result)
 }
 
+#[no_mangle]
+pub fn on_frame_export(lua: &Lua, _: ()) -> LuaResult<i32> {
+    let maybe_lib_state = unsafe { &LIB_STATE.as_ref() };
+
+    if let None = &maybe_lib_state {
+        return Ok(-1);
+    }
+
+    let on_frame = &maybe_lib_state.unwrap().on_frame_export;
+    let result = on_frame(&lua);
+    Ok(0)
+}
+
 #[mlua::lua_module]
 pub fn yawe_shim(lua: &Lua) -> LuaResult<LuaTable> {
     let exports = lua.create_table()?;
     exports.set("start", lua.create_function(start)?)?;
     exports.set("on_frame", lua.create_function(on_frame)?)?;
+    exports.set("on_frame_export", lua.create_function(on_frame_export)?)?;
     exports.set("stop", lua.create_function(stop)?)?;
     Ok(exports)
 }

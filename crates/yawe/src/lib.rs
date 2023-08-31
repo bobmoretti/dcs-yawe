@@ -6,6 +6,13 @@ mod dcs;
 mod gui;
 mod logging;
 
+#[derive(Debug, Clone)]
+pub enum Error {
+    IndexError,
+    ParseError(String),
+    LuaError(mlua::Error),
+}
+
 struct LibState {
     main_app: app::App,
 }
@@ -49,4 +56,9 @@ pub fn stop(_lua: &Lua) -> i32 {
 #[no_mangle]
 pub fn on_frame(lua: &Lua) -> i32 {
     get_lib_state().main_app.on_frame(&lua)
+}
+
+#[no_mangle]
+pub fn on_frame_export(lua: &Lua) -> i32 {
+    get_lib_state().main_app.on_frame_export(&lua)
 }

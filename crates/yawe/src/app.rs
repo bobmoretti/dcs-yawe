@@ -85,6 +85,14 @@ impl App {
             -1
         }
     }
+
+    pub fn on_frame_export(&mut self, lua: &Lua) -> i32 {
+        match dcs::get_cockpit_param(lua, "BASE_SENSOR_CANOPY_POS") {
+            Ok(canopy_state) => self.gui.set_canopy_state(canopy_state),
+            Err(e) => log::warn!("Error {:?} getting canopy state", e),
+        }
+        0
+    }
 }
 
 fn app_thread_entry(
@@ -111,13 +119,25 @@ fn app_thread_entry(
 }
 
 fn start_jet(lua: &Lua) {
-    let value = dcs::get_switch_state(lua, 0, 50);
-    if let Ok(v) = value {
-        log::info!("RPM state: {v}");
-    } else {
-        log::warn!("Failed to read state of device with {:?}", value);
-    }
-    if let Err(e) = dcs::perform_click(lua, 4, 3010, 1.0) {
-        log::warn!("Failed to perform click, result was {:?}", e);
+    use dcs::mig21bis::Switch;
+    let switches_to_start = [
+        Switch::CanopyClose,
+        Switch::FuelPump1,
+        Switch::FuelPump3,
+        Switch::FuelPumpDrain,
+        Switch::BatteryOn,
+        Switch::BatteryHeat,
+        Switch::AcGenerator,
+        Switch::DcGenerator,
+        Switch::SprdPower,
+        Switch::SprdDropPower,
+        Switch::Po750Inverter1,
+        Switch::Po750Inverter2,
+        Switch::ApuPower,
+        Switch::FireExtinguisherPower,
+    ];
+
+    for s in switches_to_start {
+        let _ = dcs::mig21bis::set_switch(lua, s);
     }
 }

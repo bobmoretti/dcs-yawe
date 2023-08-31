@@ -3,6 +3,7 @@ use crate::dcs;
 use egui_backend::{egui, BackendConfig, GfxBackend, UserApp, WindowBackend};
 use egui_render_glow::GlowBackend;
 use egui_window_glfw_passthrough::GlfwBackend;
+use std::sync::mpsc::TryRecvError;
 use std::sync::mpsc::{self, Receiver, SendError, Sender};
 
 // Publicly-facing handle to GUI thread
@@ -17,6 +18,7 @@ struct Gui {
     rx: Receiver<Message>,
     tx: Sender<app::AppMessage>,
     aircraft_name: &'static str,
+    canopy_state: f32,
     pub egui_context: egui::Context,
     pub glow_backend: GlowBackend,
     pub glfw_backend: GlfwBackend,
@@ -32,6 +34,7 @@ impl Gui {
             rx: rx,
             tx: tx,
             aircraft_name: "",
+            canopy_state: 1.0,
             glfw_backend: glfw_backend,
             glow_backend: glow_backend,
             egui_context: context,
@@ -40,6 +43,23 @@ impl Gui {
 
     fn close(&mut self) {
         self.glfw_backend.window.set_should_close(true);
+    }
+
+    fn make_debug_widget(&mut self, ui: &mut egui::Ui) {
+        ui.label("Debug switches:");
+        egui::Grid::new("debug_grid").show(ui, |ui| {
+            for switch_info in &dcs::mig21bis::SWITCH_INFO_MAP {
+                let s: &'static str = switch_info._switch.into();
+                ui.label(s);
+                if ui.button("Set").clicked() {
+                    // set
+                }
+                if ui.button("Get").clicked() {
+                    // get
+                }
+                ui.end_row();
+            }
+        });
     }
 }
 
@@ -72,6 +92,7 @@ fn aircraft_display_name(kind: dcs::AircraftId) -> &'static str {
 
 pub enum Message {
     Stop,
+    UpdateCanopyState(f32),
     UpdateOwnship(dcs::AircraftId),
 }
 
@@ -95,6 +116,13 @@ impl Handle {
         self.tx.send(Message::UpdateOwnship(kind))?;
         self.context.request_repaint();
         Ok(())
+    }
+
+    pub fn set_canopy_state(&self, state: f32) {
+        if let Err(e) = self.tx.send(Message::UpdateCanopyState(state)) {
+            log::warn!("Sending canopy state failed with {:?}", e);
+        };
+        self.context.request_repaint();
     }
 
     pub fn stop(&mut self) {
@@ -138,15 +166,28 @@ impl UserApp for Gui {
         let ctx = self.egui_context.clone();
         self.glfw_backend.window.set_floating(true);
 
-        let msg = self.rx.try_recv();
-        if let Ok(m) = msg {
-            match m {
-                Message::Stop => {
-                    log::info!("Gui: received a `Stop` message");
-                    self.close();
-                    return;
+        // process all pending messages in the queue each frame of the GUI
+        loop {
+            let msg = self.rx.try_recv();
+            if let Ok(m) = msg {
+                match m {
+                    Message::Stop => {
+                        log::info!("Gui: received a `Stop` message");
+                        self.close();
+                        return;
+                    }
+                    Message::UpdateOwnship(kind) => {
+                        self.aircraft_name = aircraft_display_name(kind)
+                    }
+                    Message::UpdateCanopyState(state) => {
+                        if self.canopy_state != state {
+                            log::info!("NEW STATE: {state}");
+                        }
+                        self.canopy_state = state
+                    }
                 }
-                Message::UpdateOwnship(kind) => self.aircraft_name = aircraft_display_name(kind),
+            } else if let Err(TryRecvError::Empty) = msg {
+                break;
             }
         }
 
@@ -159,6 +200,11 @@ impl UserApp for Gui {
             if (ui.button("Start")).clicked() {
                 let _ = self.tx.send(app::AppMessage::StartupAircraft);
             }
+            ui.horizontal(|ui| {
+                ui.label("Canopy State");
+                ui.add(egui::ProgressBar::new(self.canopy_state));
+            });
+            self.make_debug_widget(ui);
         });
     }
 }

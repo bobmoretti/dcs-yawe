@@ -21,6 +21,8 @@ log-panics = {git = "https://github.com/bobmoretti/rust-log-panics.git/", featur
 mlua = {version = "0.8", default-features = false, features = ["lua51", "module", "serialize"]}
 offload = {path = "../offload"}
 serde = {version = "1.0.160", features = ["derive"]}
+strum = { version = "0.25.0", features = ["std", "derive", "strum_macros"] }
+strum_macros = "0.25.2"
 thread-id = "4.0.0"
 wgpu = {version = "0.16.0"}
 windows = {version = "0.48.0", features = [
