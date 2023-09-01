@@ -35,7 +35,7 @@ pub enum SwitchType {
 }
 
 pub struct SwitchInfo {
-    pub _switch: Switch,
+    pub switch: Switch,
     pub device_id: i32,
     pub command: i32,
     pub argument: i32,
@@ -81,7 +81,7 @@ impl SwitchInfo {
         switch_type: SwitchType,
     ) -> Self {
         Self {
-            _switch,
+            switch: _switch,
             device_id,
             command,
             argument,

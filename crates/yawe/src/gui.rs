@@ -3,7 +3,8 @@ use crate::dcs;
 use egui_backend::{egui, BackendConfig, GfxBackend, UserApp, WindowBackend};
 use egui_render_glow::GlowBackend;
 use egui_window_glfw_passthrough::GlfwBackend;
-use std::sync::mpsc::TryRecvError;
+use mlua::Lua;
+use offload::TaskSender;
 use std::sync::mpsc::{self, Receiver, SendError, Sender};
 
 // Publicly-facing handle to GUI thread
@@ -17,15 +18,24 @@ pub struct Handle {
 struct Gui {
     rx: Receiver<Message>,
     tx: Sender<app::AppMessage>,
+    to_dcs_gamegui: TaskSender<Lua>,
+    to_dcs_export: TaskSender<Lua>,
     aircraft_name: &'static str,
     canopy_state: f32,
     pub egui_context: egui::Context,
     pub glow_backend: GlowBackend,
     pub glfw_backend: GlfwBackend,
+    switch_vals: Vec<String>,
 }
 
 impl Gui {
-    pub fn new(rx: Receiver<Message>, tx: Sender<app::AppMessage>, context: egui::Context) -> Self {
+    pub fn new(
+        rx: Receiver<Message>,
+        tx: Sender<app::AppMessage>,
+        to_dcs_gamegui: TaskSender<Lua>,
+        to_dcs_export: TaskSender<Lua>,
+        context: egui::Context,
+    ) -> Self {
         let mut glfw_backend = GlfwBackend::new(Default::default(), BackendConfig::default());
         // creating gfx backend. It uses Window backend to load things like fn pointers
         // or window handle for swapchain etc.. behind the scenes.
@@ -33,11 +43,18 @@ impl Gui {
         Self {
             rx: rx,
             tx: tx,
+            to_dcs_gamegui,
+            to_dcs_export,
             aircraft_name: "",
             canopy_state: 1.0,
             glfw_backend: glfw_backend,
             glow_backend: glow_backend,
             egui_context: context,
+            switch_vals: {
+                let mut v = Vec::with_capacity(dcs::mig21bis::Switch::NumSwitches as usize);
+                v.resize(dcs::mig21bis::Switch::NumSwitches as usize, String::new());
+                v
+            },
         }
     }
 
@@ -48,15 +65,23 @@ impl Gui {
     fn make_debug_widget(&mut self, ui: &mut egui::Ui) {
         ui.label("Debug switches:");
         egui::Grid::new("debug_grid").show(ui, |ui| {
-            for switch_info in &dcs::mig21bis::SWITCH_INFO_MAP {
-                let s: &'static str = switch_info._switch.into();
+            for (ii, &ref switch_info) in dcs::mig21bis::SWITCH_INFO_MAP.iter().enumerate() {
+                let s: &'static str = switch_info.switch.into();
                 ui.label(s);
+                let val = &mut (self.switch_vals[ii]);
                 if ui.button("Set").clicked() {
                     // set
                 }
                 if ui.button("Get").clicked() {
-                    // get
+                    let result = self
+                        .to_dcs_gamegui
+                        .send(|lua| dcs::mig21bis::get_switch_state(lua, switch_info.switch))
+                        .wait();
+                    if let Ok(state) = result {
+                        val.replace_range(.., state.unwrap_or_default().to_string().as_str());
+                    }
                 }
+                ui.add(egui::TextEdit::singleline(val));
                 ui.end_row();
             }
         });
@@ -97,13 +122,17 @@ pub enum Message {
 }
 
 impl Handle {
-    pub fn new(tx_to_app: Sender<app::AppMessage>) -> Self {
+    pub fn new(
+        tx_to_app: Sender<app::AppMessage>,
+        to_dcs_gamegui: TaskSender<Lua>,
+        to_dcs_export: TaskSender<Lua>,
+    ) -> Self {
         let (tx, rx) = mpsc::channel::<Message>();
         let tx_clone = tx.clone();
         let context = egui::Context::default();
         let context_clone = context.clone();
         let thread = std::thread::spawn(move || {
-            do_gui(rx, tx_to_app, context);
+            do_gui(rx, tx_to_app, to_dcs_gamegui, to_dcs_export, context);
         });
         Handle {
             tx: tx_clone,
@@ -202,9 +231,15 @@ impl UserApp for Gui {
     }
 }
 
-fn do_gui(rx: Receiver<Message>, tx: Sender<app::AppMessage>, context: egui::Context) {
+fn do_gui(
+    rx: Receiver<Message>,
+    tx: Sender<app::AppMessage>,
+    to_dcs_gamegui: TaskSender<Lua>,
+    to_dcs_export: TaskSender<Lua>,
+    context: egui::Context,
+) {
     log::info!("Starting gui");
-    let gui = Gui::new(rx, tx, context);
+    let gui = Gui::new(rx, tx, to_dcs_gamegui, to_dcs_export, context);
     <Gui as UserApp>::UserWindowBackend::run_event_loop(gui);
 
     log::info!("Gui closed");

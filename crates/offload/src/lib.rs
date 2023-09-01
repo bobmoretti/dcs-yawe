@@ -36,6 +36,14 @@ impl<T> Future<T> {
     }
 }
 
+impl<ArgT> Clone for TaskSender<ArgT> {
+    fn clone(&self) -> Self {
+        Self {
+            todos: self.todos.clone(),
+        }
+    }
+}
+
 impl<ArgT> TaskSender<ArgT> {
     pub fn new() -> (Self, Receiver<PackagedTask<ArgT>>) {
         let (todos, rx) = channel::<PackagedTask<ArgT>>();

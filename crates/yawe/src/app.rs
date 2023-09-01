@@ -39,7 +39,11 @@ impl App {
         let (tx_to_app, rx_from_gui) = channel::<AppMessage>();
         let (tx_to_gui, rx_from_app) = channel::<AppReply>();
 
-        let gui = gui::Handle::new(tx_to_app.clone());
+        let gui = gui::Handle::new(
+            tx_to_app.clone(),
+            tx_to_dcs_gamegui.clone(),
+            tx_to_dcs_export.clone(),
+        );
 
         let thread = std::thread::spawn(|| {
             app_thread_entry(tx_to_dcs_gamegui, tx_to_dcs_export, rx_from_gui, tx_to_gui)
@@ -106,6 +110,12 @@ impl App {
         // todo: implement timeout, but for now just process all pending messages ASAP.
         while let Ok(_) = self.rx_from_dcs_export.try_recv().map(|job| job(lua)) {}
         0
+    }
+}
+
+impl Default for App {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
