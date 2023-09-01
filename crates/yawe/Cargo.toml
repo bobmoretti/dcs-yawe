@@ -20,8 +20,9 @@ log = "^0.4.17"
 log-panics = {git = "https://github.com/bobmoretti/rust-log-panics.git/", features = ["with-backtrace"]}
 mlua = {version = "0.8", default-features = false, features = ["lua51", "module", "serialize"]}
 offload = {path = "../offload"}
+rsevents = "0.3.1"
 serde = {version = "1.0.160", features = ["derive"]}
-strum = { version = "0.25.0", features = ["std", "derive", "strum_macros"] }
+strum = {version = "0.25.0", features = ["std", "derive", "strum_macros"]}
 strum_macros = "0.25.2"
 thread-id = "4.0.0"
 wgpu = {version = "0.16.0"}

@@ -2,10 +2,11 @@ use crate::dcs;
 use crate::gui;
 use mlua::Lua;
 use offload::{PackagedTask, TaskSender};
+use rsevents::Awaitable;
+use rsevents::{AutoResetEvent, EventState};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::thread::JoinHandle;
 
-#[derive(Debug)]
 pub struct App {
     thread: Option<JoinHandle<()>>,
     tx_to_app: Sender<AppMessage>,
@@ -15,6 +16,9 @@ pub struct App {
     rx_from_dcs_export: Receiver<PackagedTask<Lua>>,
 }
 
+static FRAME_RECEIVED: AutoResetEvent = AutoResetEvent::new(EventState::Unset);
+
+#[derive(Clone, Copy)]
 pub enum AppMessage {
     StartupAircraft,
     InterruptAircraftStart,
@@ -37,10 +41,12 @@ impl App {
 
         let gui = gui::Handle::new(tx_to_app.clone());
 
+        let thread = std::thread::spawn(|| {
+            app_thread_entry(tx_to_dcs_gamegui, tx_to_dcs_export, rx_from_gui, tx_to_gui)
+        });
+
         let me = Self {
-            thread: Some(std::thread::spawn(|| {
-                app_thread_entry(tx_to_dcs_gamegui, tx_to_dcs_export, rx_from_gui, tx_to_gui)
-            })),
+            thread: Some(thread),
             tx_to_app: tx_to_app.clone(),
             gui: gui,
             ownship_type: dcs::AircraftId::Unknown(String::from("")),
@@ -82,6 +88,7 @@ impl App {
 
         // todo: implement timeout, but for now just process all pending messages ASAP.
         while let Ok(_) = self.rx_from_dcs_gamegui.try_recv().map(|job| job(lua)) {}
+        FRAME_RECEIVED.set();
 
         if self.gui.is_running() {
             0
@@ -108,44 +115,11 @@ fn app_thread_entry(
     rx_from_gui: Receiver<AppMessage>,
     tx_to_gui: Sender<AppReply>,
 ) {
+    let mut fsm = dcs::mig21bis::Fsm::new(sender_to_dcs_gamegui, sender_to_dcs_export);
     loop {
-        let mesg = rx_from_gui.recv();
-        if mesg.is_err() {
-            continue;
+        FRAME_RECEIVED.wait();
+        while let Ok(msg) = rx_from_gui.try_recv() {
+            fsm.run(msg);
         }
-        match mesg.as_ref().unwrap() {
-            AppMessage::StartupAircraft => {
-                let send_result = sender_to_dcs_gamegui.send(|lua| start_jet(&lua)).wait();
-                if let Err(e) = send_result {
-                    log::warn!("Error {:?} sending start message to DCS", e);
-                }
-            }
-            AppMessage::StopApp => return,
-            AppMessage::InterruptAircraftStart => continue,
-        };
-    }
-}
-
-fn start_jet(lua: &Lua) {
-    use dcs::mig21bis::Switch;
-    let switches_to_start = [
-        Switch::CanopyClose,
-        Switch::FuelPump1,
-        Switch::FuelPump3,
-        Switch::FuelPumpDrain,
-        Switch::BatteryOn,
-        Switch::BatteryHeat,
-        Switch::AcGenerator,
-        Switch::DcGenerator,
-        Switch::SprdPower,
-        Switch::SprdDropPower,
-        Switch::Po750Inverter1,
-        Switch::Po750Inverter2,
-        Switch::ApuPower,
-        Switch::FireExtinguisherPower,
-    ];
-
-    for s in switches_to_start {
-        let _ = dcs::mig21bis::set_switch(lua, s);
     }
 }

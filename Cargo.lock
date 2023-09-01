@@ -1358,6 +1358,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "216080ab382b992234dda86873c18d4c48358f5cfcb70fd693d7f6f2131b628b"
 
 [[package]]
+name = "rsevents"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e8e29769fda0194d58e06d876d82337aac382415df547f073f44ffea0bb0c651"
+dependencies = [
+ "parking_lot_core",
+]
+
+[[package]]
 name = "rustc-demangle"
 version = "0.1.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2255,6 +2264,7 @@ dependencies = [
  "log-panics 2.1.0 (git+https://github.com/bobmoretti/rust-log-panics.git/)",
  "mlua",
  "offload",
+ "rsevents",
  "serde",
  "strum",
  "strum_macros",
