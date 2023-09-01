@@ -99,7 +99,12 @@ fn toggle_switch(lua: &Lua, s: Switch) -> LuaResult<()> {
     dcs::perform_click(lua, info.device_id, info.command, 1.0)
 }
 
-pub fn get_switch_state(lua: &Lua, s: Switch) -> LuaResult<f64> {
+pub fn set_switch_state(lua: &Lua, s: Switch, state: f32) -> LuaResult<()> {
+    let info = get_switch_info(s);
+    dcs::perform_click(lua, info.device_id, info.command, state)
+}
+
+pub fn get_switch_state(lua: &Lua, s: Switch) -> LuaResult<f32> {
     let info = get_switch_info(s);
     dcs::get_switch_state(lua, 0, info.argument)
 }

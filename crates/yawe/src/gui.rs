@@ -19,7 +19,7 @@ struct Gui {
     rx: Receiver<Message>,
     tx: Sender<app::AppMessage>,
     to_dcs_gamegui: TaskSender<Lua>,
-    to_dcs_export: TaskSender<Lua>,
+    _to_dcs_export: TaskSender<Lua>,
     aircraft_name: &'static str,
     canopy_state: f32,
     pub egui_context: egui::Context,
@@ -44,7 +44,7 @@ impl Gui {
             rx: rx,
             tx: tx,
             to_dcs_gamegui,
-            to_dcs_export,
+            _to_dcs_export: to_dcs_export,
             aircraft_name: "",
             canopy_state: 1.0,
             glfw_backend: glfw_backend,
@@ -70,7 +70,12 @@ impl Gui {
                 ui.label(s);
                 let val = &mut (self.switch_vals[ii]);
                 if ui.button("Set").clicked() {
-                    // set
+                    let result = val.parse::<f32>();
+                    if let Ok(state) = result {
+                        let _ = self.to_dcs_gamegui.send(move |lua| {
+                            dcs::mig21bis::set_switch_state(lua, switch_info.switch, state)
+                        });
+                    }
                 }
                 if ui.button("Get").clicked() {
                     let result = self
@@ -204,12 +209,7 @@ impl UserApp for Gui {
                     return;
                 }
                 Message::UpdateOwnship(kind) => self.aircraft_name = aircraft_display_name(kind),
-                Message::UpdateCanopyState(state) => {
-                    if self.canopy_state != state {
-                        log::info!("NEW STATE: {state}");
-                    }
-                    self.canopy_state = state
-                }
+                Message::UpdateCanopyState(state) => self.canopy_state = state,
             }
         }
 

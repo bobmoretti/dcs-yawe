@@ -75,13 +75,13 @@ fn get_cockpit_device(lua: &Lua, device_id: i32) -> LuaResult<LuaTable> {
     get_device.unwrap().call(device_id)
 }
 
-pub fn perform_click(lua: &Lua, device_id: i32, command: i32, value: f64) -> LuaResult<()> {
+pub fn perform_click(lua: &Lua, device_id: i32, command: i32, value: f32) -> LuaResult<()> {
     let device: LuaTable = get_cockpit_device(lua, device_id)?;
     let perform_click: LuaFunction = device.get("performClickableAction")?;
     perform_click.call((device, command, value))
 }
 
-pub fn get_switch_state(lua: &Lua, device_id: i32, command: i32) -> LuaResult<f64> {
+pub fn get_switch_state(lua: &Lua, device_id: i32, command: i32) -> LuaResult<f32> {
     let device: LuaTable = get_cockpit_device(lua, device_id)?;
     let get_value: LuaResult<LuaFunction> = device.get("get_argument_value");
     if let Err(e) = get_value {
@@ -94,7 +94,7 @@ pub fn get_switch_state(lua: &Lua, device_id: i32, command: i32) -> LuaResult<f6
     get_value.unwrap().call((device, command))
 }
 
-pub fn set_command(lua: &Lua, command: i32, value: f64) -> LuaResult<f64> {
+pub fn set_command(lua: &Lua, command: i32, value: f32) -> LuaResult<f32> {
     let export: LuaTable = lua.globals().get("Export")?;
     let set_command: LuaResult<LuaFunction> = export.get("LoGetCommand");
     if let Err(e) = set_command {
