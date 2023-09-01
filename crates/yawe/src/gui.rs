@@ -167,27 +167,20 @@ impl UserApp for Gui {
         self.glfw_backend.window.set_floating(true);
 
         // process all pending messages in the queue each frame of the GUI
-        loop {
-            let msg = self.rx.try_recv();
-            if let Ok(m) = msg {
-                match m {
-                    Message::Stop => {
-                        log::info!("Gui: received a `Stop` message");
-                        self.close();
-                        return;
-                    }
-                    Message::UpdateOwnship(kind) => {
-                        self.aircraft_name = aircraft_display_name(kind)
-                    }
-                    Message::UpdateCanopyState(state) => {
-                        if self.canopy_state != state {
-                            log::info!("NEW STATE: {state}");
-                        }
-                        self.canopy_state = state
-                    }
+        while let Ok(m) = self.rx.try_recv() {
+            match m {
+                Message::Stop => {
+                    log::info!("Gui: received a `Stop` message");
+                    self.close();
+                    return;
                 }
-            } else if let Err(TryRecvError::Empty) = msg {
-                break;
+                Message::UpdateOwnship(kind) => self.aircraft_name = aircraft_display_name(kind),
+                Message::UpdateCanopyState(state) => {
+                    if self.canopy_state != state {
+                        log::info!("NEW STATE: {state}");
+                    }
+                    self.canopy_state = state
+                }
             }
         }
 

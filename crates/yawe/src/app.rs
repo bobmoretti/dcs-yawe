@@ -11,7 +11,8 @@ pub struct App {
     tx_to_app: Sender<AppMessage>,
     gui: gui::Handle,
     ownship_type: dcs::AircraftId,
-    dcs_worker_rx: Receiver<PackagedTask<Lua>>,
+    rx_from_dcs_gamegui: Receiver<PackagedTask<Lua>>,
+    rx_from_dcs_export: Receiver<PackagedTask<Lua>>,
 }
 
 pub enum AppMessage {
@@ -28,8 +29,9 @@ impl App {
     // Start the main application (scoped) thread, return an interface handle to
     // allow the outside world to talk to it.
     pub fn new() -> Self {
-        // create a new gui handle
-        let (dcs_worker_tx, dcs_worker_rx) = TaskSender::new();
+        //
+        let (tx_to_dcs_gamegui, rx_from_dcs_gamegui) = TaskSender::new();
+        let (tx_to_dcs_export, rx_from_dcs_export) = TaskSender::new();
         let (tx_to_app, rx_from_gui) = channel::<AppMessage>();
         let (tx_to_gui, rx_from_app) = channel::<AppReply>();
 
@@ -37,12 +39,13 @@ impl App {
 
         let me = Self {
             thread: Some(std::thread::spawn(|| {
-                app_thread_entry(dcs_worker_tx, rx_from_gui, tx_to_gui)
+                app_thread_entry(tx_to_dcs_gamegui, tx_to_dcs_export, rx_from_gui, tx_to_gui)
             })),
             tx_to_app: tx_to_app.clone(),
             gui: gui,
             ownship_type: dcs::AircraftId::Unknown(String::from("")),
-            dcs_worker_rx,
+            rx_from_dcs_export,
+            rx_from_dcs_gamegui,
         };
         me
     }
@@ -77,7 +80,8 @@ impl App {
             }
         }
 
-        let _ = self.dcs_worker_rx.try_recv().map(|job| job(lua));
+        // todo: implement timeout, but for now just process all pending messages ASAP.
+        while let Ok(_) = self.rx_from_dcs_gamegui.try_recv().map(|job| job(lua)) {}
 
         if self.gui.is_running() {
             0
@@ -91,12 +95,16 @@ impl App {
             Ok(canopy_state) => self.gui.set_canopy_state(canopy_state),
             Err(e) => log::warn!("Error {:?} getting canopy state", e),
         }
+
+        // todo: implement timeout, but for now just process all pending messages ASAP.
+        while let Ok(_) = self.rx_from_dcs_export.try_recv().map(|job| job(lua)) {}
         0
     }
 }
 
 fn app_thread_entry(
-    sender_to_dcs: TaskSender<Lua>,
+    sender_to_dcs_gamegui: TaskSender<Lua>,
+    sender_to_dcs_export: TaskSender<Lua>,
     rx_from_gui: Receiver<AppMessage>,
     tx_to_gui: Sender<AppReply>,
 ) {
@@ -107,7 +115,7 @@ fn app_thread_entry(
         }
         match mesg.as_ref().unwrap() {
             AppMessage::StartupAircraft => {
-                let send_result = sender_to_dcs.send(|lua| start_jet(&lua)).wait();
+                let send_result = sender_to_dcs_gamegui.send(|lua| start_jet(&lua)).wait();
                 if let Err(e) = send_result {
                     log::warn!("Error {:?} sending start message to DCS", e);
                 }

@@ -3,7 +3,7 @@ pub mod mig21bis;
 use crate::Error;
 use std::str::FromStr;
 
-use mlua::prelude::{LuaError, LuaFunction, LuaResult, LuaTable};
+use mlua::prelude::{LuaFunction, LuaResult, LuaTable};
 use mlua::Lua;
 
 #[derive(PartialEq, Debug, Clone)]
