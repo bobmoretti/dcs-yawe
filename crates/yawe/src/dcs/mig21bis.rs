@@ -4,6 +4,8 @@ use mlua::Lua;
 use offload::TaskSender;
 use strum::IntoStaticStr;
 
+use super::get_cockpit_param;
+
 #[derive(Debug, Clone, Copy, IntoStaticStr)]
 #[allow(dead_code)]
 pub enum Switch {
@@ -25,6 +27,39 @@ pub enum Switch {
     CanopyClose,
     CanopyLock,
     CanopySeal,
+    EngineStart,
+    EngineStartLight,
+    Gyro1,
+    Gyro2,
+    SrzoPower,
+    SauPower,
+    SauPitchPower,
+    TrimmerPower,
+    NoseconePower,
+    EmergencyHydroPump,
+    KppMainEmergencyToggle,
+    NppPower,
+    RadAltPower,
+    AspPower,
+    MissileHeatPower,
+    MissileLaunchPower,
+    InboardPylonPower,
+    OutboardPylonPower,
+    GunPower,
+    GunCameraPower,
+    FlightRecorderPower,
+    RadioPower,
+    ArkPower,
+    RadarPower,
+    SpoPower,
+    PipperEnable,
+    FixedNetEnable,
+    GunPyro1,
+    GunPyro2,
+    GunPyro3,
+    WeaponModeAaAg,
+    GuidedMissileMode,
+    WeaponSelect,
     NumSwitches,
 }
 
@@ -32,6 +67,8 @@ pub enum Switch {
 pub enum SwitchType {
     Toggle,
     Momentary,
+    Indicator,
+    MultiToggle,
 }
 
 pub struct SwitchInfo {
@@ -63,12 +100,46 @@ pub static SWITCH_INFO_MAP: [SwitchInfo; Switch::NumSwitches as usize] = [
     SwitchInfo::new(Switch::CanopyClose, 43, 3194, 385, St::Momentary),
     SwitchInfo::new(Switch::CanopyLock, 43, 3151, 329, St::Toggle),
     SwitchInfo::new(Switch::CanopySeal, 43, 3150, 328, St::Toggle),
+    SwitchInfo::new(Switch::EngineStart, 3, 3016, 289, St::Momentary),
+    SwitchInfo::new(Switch::EngineStartLight, 0, 0, 509, St::Indicator),
+    SwitchInfo::new(Switch::Gyro1, 21, 3008, 162, St::Toggle),
+    SwitchInfo::new(Switch::Gyro2, 21, 3009, 163, St::Toggle),
+    SwitchInfo::new(Switch::SrzoPower, 38, 3087, 188, St::Toggle),
+    SwitchInfo::new(Switch::SauPower, 8, 3064, 179, St::Toggle),
+    SwitchInfo::new(Switch::SauPitchPower, 8, 3065, 180, St::Toggle),
+    SwitchInfo::new(Switch::TrimmerPower, 9, 3131, 172, St::Toggle),
+    SwitchInfo::new(Switch::NoseconePower, 17, 3133, 170, St::Toggle),
+    SwitchInfo::new(Switch::EmergencyHydroPump, 44, 3137, 171, St::Toggle),
+    SwitchInfo::new(Switch::KppMainEmergencyToggle, 28, 3139, 177, St::Toggle),
+    SwitchInfo::new(Switch::NppPower, 23, 3142, 178, St::Toggle),
+    SwitchInfo::new(Switch::RadAltPower, 33, 3145, 175, St::Toggle),
+    SwitchInfo::new(Switch::AspPower, 41, 3155, 186, St::Toggle),
+    SwitchInfo::new(Switch::MissileHeatPower, 42, 3167, 181, St::Toggle),
+    SwitchInfo::new(Switch::MissileLaunchPower, 42, 3168, 182, St::Toggle),
+    SwitchInfo::new(Switch::InboardPylonPower, 42, 3169, 183, St::Toggle),
+    SwitchInfo::new(Switch::OutboardPylonPower, 42, 3170, 184, St::Toggle),
+    SwitchInfo::new(Switch::GunPower, 42, 3171, 185, St::Toggle),
+    SwitchInfo::new(Switch::GunCameraPower, 42, 3172, 187, St::Toggle),
+    SwitchInfo::new(Switch::FlightRecorderPower, 49, 3209, 193, St::Toggle),
+    SwitchInfo::new(Switch::RadioPower, 22, 3041, 173, St::Toggle),
+    SwitchInfo::new(Switch::ArkPower, 24, 3047, 174, St::Toggle),
+    SwitchInfo::new(Switch::RadarPower, 40, 3094, 205, St::MultiToggle),
+    SwitchInfo::new(Switch::SpoPower, 37, 3083, 202, St::Toggle),
+    SwitchInfo::new(Switch::PipperEnable, 41, 3160, 249, St::Toggle),
+    SwitchInfo::new(Switch::FixedNetEnable, 41, 3161, 250, St::Toggle),
+    SwitchInfo::new(Switch::GunPyro1, 42, 3185, 232, St::Momentary),
+    SwitchInfo::new(Switch::GunPyro2, 42, 3186, 233, St::Momentary),
+    SwitchInfo::new(Switch::GunPyro3, 42, 3187, 234, St::Momentary),
+    SwitchInfo::new(Switch::WeaponModeAaAg, 42, 3183, 230, St::Toggle),
+    SwitchInfo::new(Switch::GuidedMissileMode, 42, 3184, 231, St::MultiToggle),
+    SwitchInfo::new(Switch::WeaponSelect, 42, 3188, 235, St::MultiToggle),
 ];
 
 enum StartupState {
     ColdDark,
     WaitCanopyClosed,
-    WaitEngineStarted,
+    WaitEngineStartBegun,
+    WaitEngineStartComplete,
     Done,
 }
 
@@ -129,12 +200,32 @@ pub fn unset_switch(lua: &Lua, s: Switch) -> LuaResult<()> {
     }
 }
 
-fn start_jet(lua: &Lua) {}
-
 pub struct Fsm {
     state: StartupState,
     to_dcs_gamegui: TaskSender<Lua>,
     to_dcs_export: TaskSender<Lua>,
+}
+
+fn poll_argument(to_gamegui: &TaskSender<Lua>, switch: Switch) -> Result<f32, crate::Error> {
+    to_gamegui
+        .send(move |lua| get_switch_state(lua, switch))
+        .wait()
+        .map_err(|_| crate::Error::CommError)?
+        .map_err(|e| crate::Error::LuaError(e))
+}
+
+fn handle_polling_err(r: &Result<f32, crate::Error>) {
+    if let Err(err) = r {
+        match err {
+            crate::Error::LuaError(e) => {
+                log::warn!(
+                    "Lua error encountered when polling Engine Start Light {:?}",
+                    e
+                )
+            }
+            _ => {}
+        }
+    }
 }
 
 impl Fsm {
@@ -149,45 +240,145 @@ impl Fsm {
         match self.state {
             StartupState::ColdDark => self.cold_dark_handler(event),
             StartupState::WaitCanopyClosed => self.wait_canopy_closed(event),
-            StartupState::WaitEngineStarted => self.wait_engine_started(event),
+            StartupState::WaitEngineStartBegun => self.wait_engine_start_begun(event),
+            StartupState::WaitEngineStartComplete => self.wait_engine_start_complete(event),
             StartupState::Done => self.done(event),
         }
     }
     fn cold_dark_handler(&mut self, event: crate::app::AppMessage) {
         match event {
-            crate::app::AppMessage::StartupAircraft => self.throw_initial_switches(),
+            crate::app::AppMessage::StartupAircraft => {
+                self.throw_initial_switches();
+                self.state = StartupState::WaitCanopyClosed;
+            }
             _ => {}
         }
     }
-    fn wait_canopy_closed(&mut self, event: crate::app::AppMessage) {}
-    fn wait_engine_started(&mut self, event: crate::app::AppMessage) {}
-    fn done(&mut self, event: crate::app::AppMessage) {}
+    fn wait_canopy_closed(&mut self, _event: crate::app::AppMessage) {
+        let r = self
+            .to_dcs_export
+            .send(|lua| get_cockpit_param(lua, "BASE_SENSOR_CANOPY_POS"))
+            .wait();
+        if let Err(_) = r {
+            return;
+        }
+
+        let lua_result = r.unwrap();
+        if let Err(e) = lua_result {
+            log::warn!("Polling canopy failed {:?}", e);
+            return;
+        }
+
+        let cockpit_state = lua_result.unwrap();
+        if cockpit_state == 0.0 as f32 {
+            // todo! start the engine here
+            let _ = self
+                .to_dcs_gamegui
+                .send(|lua| {
+                    let _ = set_switch(lua, Switch::CanopyLock);
+                    let _ = set_switch(lua, Switch::CanopySeal);
+                    let _ = set_switch_state(lua, Switch::EngineStart, 1.0);
+                })
+                .wait();
+            self.state = StartupState::WaitEngineStartBegun;
+        }
+    }
+
+    fn wait_engine_start_begun(&mut self, _event: crate::app::AppMessage) {
+        let result = poll_argument(&self.to_dcs_gamegui, Switch::EngineStartLight);
+        if result.is_err() {
+            handle_polling_err(&result);
+            return;
+        }
+        let light = result.unwrap();
+        if light > 0.9 {
+            self.to_dcs_gamegui
+                .send(|lua| set_switch_state(lua, Switch::EngineStart, 0.0));
+            self.state = StartupState::WaitEngineStartComplete
+        }
+    }
+
+    fn wait_engine_start_complete(&mut self, _event: crate::app::AppMessage) {
+        let result = poll_argument(&self.to_dcs_gamegui, Switch::EngineStartLight);
+        if result.is_err() {
+            handle_polling_err(&result);
+            return;
+        }
+        let light = result.unwrap();
+        if light < 0.1 {
+            self.throw_post_engine_start_switches();
+            self.state = StartupState::Done;
+        }
+    }
+    fn done(&mut self, _event: crate::app::AppMessage) {}
 
     fn throw_initial_switches(&self) {
+        let _ = self.to_dcs_gamegui.send(|lua| {
+            let switches_to_start = [
+                Switch::CanopyClose,
+                Switch::FuelPump1,
+                Switch::FuelPump3,
+                Switch::FuelPumpDrain,
+                Switch::BatteryOn,
+                Switch::BatteryHeat,
+                Switch::AcGenerator,
+                Switch::DcGenerator,
+                Switch::SprdPower,
+                Switch::SprdDropPower,
+                Switch::Po750Inverter1,
+                Switch::Po750Inverter2,
+                Switch::ApuPower,
+                Switch::FireExtinguisherPower,
+                Switch::ThrottleStopLock,
+            ];
+
+            for s in switches_to_start {
+                let _ = set_switch(lua, s);
+            }
+        });
+    }
+
+    fn throw_post_engine_start_switches(&self) {
         let _ = self
             .to_dcs_gamegui
             .send(|lua| {
-                let switches_to_start = [
-                    Switch::CanopyClose,
-                    Switch::FuelPump1,
-                    Switch::FuelPump3,
-                    Switch::FuelPumpDrain,
-                    Switch::BatteryOn,
-                    Switch::BatteryHeat,
-                    Switch::AcGenerator,
-                    Switch::DcGenerator,
-                    Switch::SprdPower,
-                    Switch::SprdDropPower,
-                    Switch::Po750Inverter1,
-                    Switch::Po750Inverter2,
-                    Switch::ApuPower,
-                    Switch::FireExtinguisherPower,
+                let switches = [
+                    Switch::Gyro1,
+                    Switch::Gyro2,
+                    Switch::SrzoPower,
+                    Switch::SauPower,
+                    Switch::SauPitchPower,
+                    Switch::TrimmerPower,
+                    Switch::NoseconePower,
+                    Switch::EmergencyHydroPump,
+                    Switch::KppMainEmergencyToggle,
+                    Switch::NppPower,
+                    Switch::RadAltPower,
+                    Switch::AspPower,
+                    Switch::MissileHeatPower,
+                    Switch::MissileLaunchPower,
+                    Switch::InboardPylonPower,
+                    Switch::OutboardPylonPower,
+                    Switch::GunPower,
+                    Switch::FlightRecorderPower,
+                    Switch::RadioPower,
+                    Switch::ArkPower,
+                    Switch::SpoPower,
+                    Switch::PipperEnable,
+                    Switch::FixedNetEnable,
+                    Switch::WeaponModeAaAg,
                 ];
-
-                for s in switches_to_start {
-                    let _ = dcs::mig21bis::set_switch(lua, s);
+                for s in switches {
+                    let _ = set_switch(lua, s);
                 }
+                let _ = set_switch_state(lua, Switch::WeaponSelect, 0.7);
+                let _ = set_switch_state(lua, Switch::GuidedMissileMode, 1.0);
+                let _ = set_switch_state(lua, Switch::RadarPower, 0.5);
+                let _ = set_switch_state(lua, Switch::GunPyro1, 1.0);
             })
             .wait();
+        let _ = self
+            .to_dcs_gamegui
+            .send(|lua| set_switch_state(lua, Switch::GunPyro1, 0.0));
     }
 }

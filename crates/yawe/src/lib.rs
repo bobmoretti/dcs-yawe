@@ -9,6 +9,7 @@ mod logging;
 #[derive(Debug, Clone)]
 pub enum Error {
     IndexError,
+    CommError,
     ParseError(String),
     LuaError(mlua::Error),
 }

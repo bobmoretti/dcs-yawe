@@ -16,13 +16,14 @@ pub struct App {
     rx_from_dcs_export: Receiver<PackagedTask<Lua>>,
 }
 
-static FRAME_RECEIVED: AutoResetEvent = AutoResetEvent::new(EventState::Unset);
+static AWAKEN_APP_THREAD: AutoResetEvent = AutoResetEvent::new(EventState::Unset);
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq)]
 pub enum AppMessage {
     StartupAircraft,
     InterruptAircraftStart,
     StopApp,
+    None,
 }
 
 pub enum AppReply {
@@ -67,6 +68,7 @@ impl App {
                 e
             );
         };
+        AWAKEN_APP_THREAD.set();
         let thread_finish = std::mem::take(&mut self.thread);
         self.gui.stop();
         thread_finish.unwrap().join().unwrap();
@@ -92,7 +94,7 @@ impl App {
 
         // todo: implement timeout, but for now just process all pending messages ASAP.
         while let Ok(_) = self.rx_from_dcs_gamegui.try_recv().map(|job| job(lua)) {}
-        FRAME_RECEIVED.set();
+        AWAKEN_APP_THREAD.set();
 
         if self.gui.is_running() {
             0
@@ -127,9 +129,14 @@ fn app_thread_entry(
 ) {
     let mut fsm = dcs::mig21bis::Fsm::new(sender_to_dcs_gamegui, sender_to_dcs_export);
     loop {
-        FRAME_RECEIVED.wait();
-        while let Ok(msg) = rx_from_gui.try_recv() {
+        AWAKEN_APP_THREAD.wait();
+        if let Ok(msg) = rx_from_gui.try_recv() {
+            if msg == AppMessage::StopApp {
+                return;
+            }
             fsm.run(msg);
+        } else {
+            fsm.run(AppMessage::None);
         }
     }
 }
