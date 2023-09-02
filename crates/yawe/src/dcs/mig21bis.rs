@@ -52,6 +52,9 @@ pub enum Switch {
     ArkPower,
     RadarPower,
     SpoPower,
+    Srzo81Power,
+    SodPower,
+    SprdCover,
     PipperEnable,
     FixedNetEnable,
     GunPyro1,
@@ -126,6 +129,9 @@ pub static SWITCH_INFO_MAP: [SwitchInfo; Switch::NumSwitches as usize] = [
     SwitchInfo::new(Switch::ArkPower, 24, 3047, 174, St::Toggle),
     SwitchInfo::new(Switch::RadarPower, 40, 3094, 205, St::MultiToggle),
     SwitchInfo::new(Switch::SpoPower, 37, 3083, 202, St::Toggle),
+    SwitchInfo::new(Switch::Srzo81Power, 38, 3089, 346, St::Toggle),
+    SwitchInfo::new(Switch::SodPower, 39, 3090, 200, St::Toggle),
+    SwitchInfo::new(Switch::SprdCover, 48, 3109, 317, St::Toggle),
     SwitchInfo::new(Switch::PipperEnable, 41, 3160, 249, St::Toggle),
     SwitchInfo::new(Switch::FixedNetEnable, 41, 3161, 250, St::Toggle),
     SwitchInfo::new(Switch::GunPyro1, 42, 3185, 232, St::Momentary),
@@ -405,6 +411,9 @@ impl Fsm {
                     Switch::PipperEnable,
                     Switch::FixedNetEnable,
                     Switch::WeaponModeAaAg,
+                    Switch::Srzo81Power,
+                    Switch::SodPower,
+                    Switch::SprdCover,
                 ];
                 for s in switches {
                     let _ = set_switch(lua, s);
