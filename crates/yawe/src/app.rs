@@ -26,10 +26,6 @@ pub enum AppMessage {
     None,
 }
 
-pub enum AppReply {
-    StartupComplete,
-}
-
 impl App {
     // Start the main application (scoped) thread, return an interface handle to
     // allow the outside world to talk to it.
@@ -38,7 +34,6 @@ impl App {
         let (tx_to_dcs_gamegui, rx_from_dcs_gamegui) = TaskSender::new();
         let (tx_to_dcs_export, rx_from_dcs_export) = TaskSender::new();
         let (tx_to_app, rx_from_gui) = channel::<AppMessage>();
-        let (tx_to_gui, rx_from_app) = channel::<AppReply>();
 
         let gui = gui::Handle::new(
             tx_to_app.clone(),
@@ -46,8 +41,10 @@ impl App {
             tx_to_dcs_export.clone(),
         );
 
-        let thread = std::thread::spawn(|| {
-            app_thread_entry(tx_to_dcs_gamegui, tx_to_dcs_export, rx_from_gui, tx_to_gui)
+        let handle = gui.tx_handle();
+
+        let thread = std::thread::spawn(move || {
+            app_thread_entry(tx_to_dcs_gamegui, tx_to_dcs_export, handle, rx_from_gui)
         });
 
         let me = Self {
@@ -104,11 +101,6 @@ impl App {
     }
 
     pub fn on_frame_export(&mut self, lua: &Lua) -> i32 {
-        match dcs::get_cockpit_param(lua, "BASE_SENSOR_CANOPY_POS") {
-            Ok(canopy_state) => self.gui.set_canopy_state(canopy_state),
-            Err(e) => log::warn!("Error {:?} getting canopy state", e),
-        }
-
         // todo: implement timeout, but for now just process all pending messages ASAP.
         while let Ok(_) = self.rx_from_dcs_export.try_recv().map(|job| job(lua)) {}
         0
@@ -124,10 +116,10 @@ impl Default for App {
 fn app_thread_entry(
     sender_to_dcs_gamegui: TaskSender<Lua>,
     sender_to_dcs_export: TaskSender<Lua>,
+    gui_handle: gui::TxHandle,
     rx_from_gui: Receiver<AppMessage>,
-    tx_to_gui: Sender<AppReply>,
 ) {
-    let mut fsm = dcs::mig21bis::Fsm::new(sender_to_dcs_gamegui, sender_to_dcs_export);
+    let mut fsm = dcs::mig21bis::Fsm::new(sender_to_dcs_gamegui, sender_to_dcs_export, gui_handle);
     loop {
         AWAKEN_APP_THREAD.wait();
         if let Ok(msg) = rx_from_gui.try_recv() {

@@ -60,6 +60,7 @@ pub enum Switch {
     WeaponModeAaAg,
     GuidedMissileMode,
     WeaponSelect,
+    NppAdjust,
     NumSwitches,
 }
 
@@ -133,6 +134,7 @@ pub static SWITCH_INFO_MAP: [SwitchInfo; Switch::NumSwitches as usize] = [
     SwitchInfo::new(Switch::WeaponModeAaAg, 42, 3183, 230, St::Toggle),
     SwitchInfo::new(Switch::GuidedMissileMode, 42, 3184, 231, St::MultiToggle),
     SwitchInfo::new(Switch::WeaponSelect, 42, 3188, 235, St::MultiToggle),
+    SwitchInfo::new(Switch::NppAdjust, 23, 3143, 258, St::Momentary),
 ];
 
 enum StartupState {
@@ -200,12 +202,6 @@ pub fn unset_switch(lua: &Lua, s: Switch) -> LuaResult<()> {
     }
 }
 
-pub struct Fsm {
-    state: StartupState,
-    to_dcs_gamegui: TaskSender<Lua>,
-    to_dcs_export: TaskSender<Lua>,
-}
-
 fn poll_argument(to_gamegui: &TaskSender<Lua>, switch: Switch) -> Result<f32, crate::Error> {
     to_gamegui
         .send(move |lua| get_switch_state(lua, switch))
@@ -228,12 +224,24 @@ fn handle_polling_err(r: &Result<f32, crate::Error>) {
     }
 }
 
+pub struct Fsm {
+    state: StartupState,
+    to_dcs_gamegui: TaskSender<Lua>,
+    to_dcs_export: TaskSender<Lua>,
+    gui: crate::gui::TxHandle,
+}
+
 impl Fsm {
-    pub fn new(to_dcs_gamegui: TaskSender<Lua>, to_dcs_export: TaskSender<Lua>) -> Self {
+    pub fn new(
+        to_dcs_gamegui: TaskSender<Lua>,
+        to_dcs_export: TaskSender<Lua>,
+        gui: crate::gui::TxHandle,
+    ) -> Self {
         Self {
             state: StartupState::ColdDark,
             to_dcs_gamegui,
             to_dcs_export,
+            gui,
         }
     }
     pub fn run(&mut self, event: crate::app::AppMessage) {
@@ -248,7 +256,13 @@ impl Fsm {
     fn cold_dark_handler(&mut self, event: crate::app::AppMessage) {
         match event {
             crate::app::AppMessage::StartupAircraft => {
+                // this should cause the progress bar to begin animating
+                self.gui.set_startup_progress(0.001);
+                self.gui.set_startup_text("Setting up initial switches");
                 self.throw_initial_switches();
+                self.gui.set_startup_progress(0.05);
+                self.gui.set_startup_text("Waiting for canopy to close");
+
                 self.state = StartupState::WaitCanopyClosed;
             }
             _ => {}
@@ -271,7 +285,8 @@ impl Fsm {
 
         let cockpit_state = lua_result.unwrap();
         if cockpit_state == 0.0 as f32 {
-            // todo! start the engine here
+            self.gui.set_startup_progress(0.1);
+            self.gui.set_startup_text("Sealing canopy");
             let _ = self
                 .to_dcs_gamegui
                 .send(|lua| {
@@ -280,6 +295,9 @@ impl Fsm {
                     let _ = set_switch_state(lua, Switch::EngineStart, 1.0);
                 })
                 .wait();
+            self.gui.set_startup_progress(0.18);
+            self.gui
+                .set_startup_text("Waiting for engine start sequence");
             self.state = StartupState::WaitEngineStartBegun;
         }
     }
@@ -291,11 +309,19 @@ impl Fsm {
             return;
         }
         let light = result.unwrap();
-        if light > 0.9 {
-            self.to_dcs_gamegui
-                .send(|lua| set_switch_state(lua, Switch::EngineStart, 0.0));
-            self.state = StartupState::WaitEngineStartComplete
+        if light < 0.9 {
+            return;
         }
+        self.gui.set_startup_text("Starting up systems");
+        self.to_dcs_gamegui
+            .send(|lua| set_switch_state(lua, Switch::EngineStart, 0.0));
+        self.gui.set_startup_progress(0.2);
+
+        self.throw_post_engine_start_switches();
+        self.gui.set_startup_progress(0.22);
+        self.gui
+            .set_startup_text("Waiting for engine start sequence to complete");
+        self.state = StartupState::WaitEngineStartComplete;
     }
 
     fn wait_engine_start_complete(&mut self, _event: crate::app::AppMessage) {
@@ -305,37 +331,49 @@ impl Fsm {
             return;
         }
         let light = result.unwrap();
-        if light < 0.1 {
-            self.throw_post_engine_start_switches();
-            self.state = StartupState::Done;
+        if light > 0.1 {
+            return;
         }
+        self.gui.set_startup_text("Waiting for NPP adjust");
+        self.gui.set_startup_progress(0.8);
+        // this should be moved into a separate state and made nonblocking, but for now
+        // just block the thread for 5 seconds while it aligns.
+        self.run_npp_adjust();
+
+        self.gui.set_startup_progress(1.0);
+        self.gui.set_startup_text("DONE");
+        self.state = StartupState::Done;
     }
+
     fn done(&mut self, _event: crate::app::AppMessage) {}
 
     fn throw_initial_switches(&self) {
-        let _ = self.to_dcs_gamegui.send(|lua| {
-            let switches_to_start = [
-                Switch::CanopyClose,
-                Switch::FuelPump1,
-                Switch::FuelPump3,
-                Switch::FuelPumpDrain,
-                Switch::BatteryOn,
-                Switch::BatteryHeat,
-                Switch::AcGenerator,
-                Switch::DcGenerator,
-                Switch::SprdPower,
-                Switch::SprdDropPower,
-                Switch::Po750Inverter1,
-                Switch::Po750Inverter2,
-                Switch::ApuPower,
-                Switch::FireExtinguisherPower,
-                Switch::ThrottleStopLock,
-            ];
+        let _ = self
+            .to_dcs_gamegui
+            .send(|lua| {
+                let switches_to_start = [
+                    Switch::CanopyClose,
+                    Switch::FuelPump1,
+                    Switch::FuelPump3,
+                    Switch::FuelPumpDrain,
+                    Switch::BatteryOn,
+                    Switch::BatteryHeat,
+                    Switch::AcGenerator,
+                    Switch::DcGenerator,
+                    Switch::SprdPower,
+                    Switch::SprdDropPower,
+                    Switch::Po750Inverter1,
+                    Switch::Po750Inverter2,
+                    Switch::ApuPower,
+                    Switch::FireExtinguisherPower,
+                    Switch::ThrottleStopLock,
+                ];
 
-            for s in switches_to_start {
-                let _ = set_switch(lua, s);
-            }
-        });
+                for s in switches_to_start {
+                    let _ = set_switch(lua, s);
+                }
+            })
+            .wait();
     }
 
     fn throw_post_engine_start_switches(&self) {
@@ -379,6 +417,20 @@ impl Fsm {
             .wait();
         let _ = self
             .to_dcs_gamegui
-            .send(|lua| set_switch_state(lua, Switch::GunPyro1, 0.0));
+            .send(|lua| set_switch_state(lua, Switch::GunPyro1, 0.0))
+            .wait();
+    }
+
+    fn run_npp_adjust(&self) {
+        let _ = self
+            .to_dcs_gamegui
+            .send(|lua| set_switch_state(lua, Switch::NppAdjust, 1.0))
+            .wait();
+
+        std::thread::sleep(std::time::Duration::from_secs(6));
+        let _ = self
+            .to_dcs_gamegui
+            .send(|lua| set_switch_state(lua, Switch::NppAdjust, 0.0))
+            .wait();
     }
 }

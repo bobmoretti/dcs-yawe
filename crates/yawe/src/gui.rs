@@ -7,25 +7,20 @@ use mlua::Lua;
 use offload::TaskSender;
 use std::sync::mpsc::{self, Receiver, SendError, Sender};
 
-// Publicly-facing handle to GUI thread
-#[derive(Debug)]
-pub struct Handle {
-    tx: Sender<Message>,
-    thread: Option<std::thread::JoinHandle<()>>,
-    context: egui::Context,
-}
-
 struct Gui {
     rx: Receiver<Message>,
     tx: Sender<app::AppMessage>,
     to_dcs_gamegui: TaskSender<Lua>,
     _to_dcs_export: TaskSender<Lua>,
     aircraft_name: &'static str,
-    canopy_state: f32,
+    startup_progress: f32,
     pub egui_context: egui::Context,
     pub glow_backend: GlowBackend,
     pub glfw_backend: GlfwBackend,
     switch_vals: Vec<String>,
+    is_on_top: bool,
+    debug_widget_visible: bool,
+    startup_text: String,
 }
 
 impl Gui {
@@ -46,7 +41,7 @@ impl Gui {
             to_dcs_gamegui,
             _to_dcs_export: to_dcs_export,
             aircraft_name: "",
-            canopy_state: 1.0,
+            startup_progress: 0.0,
             glfw_backend: glfw_backend,
             glow_backend: glow_backend,
             egui_context: context,
@@ -55,6 +50,9 @@ impl Gui {
                 v.resize(dcs::mig21bis::Switch::NumSwitches as usize, String::new());
                 v
             },
+            is_on_top: true,
+            debug_widget_visible: false,
+            startup_text: String::default(),
         }
     }
 
@@ -93,6 +91,89 @@ impl Gui {
     }
 }
 
+impl UserApp for Gui {
+    type UserGfxBackend = GlowBackend;
+    type UserWindowBackend = GlfwBackend;
+    fn get_all(
+        &mut self,
+    ) -> (
+        &mut Self::UserWindowBackend,
+        &mut Self::UserGfxBackend,
+        &egui::Context,
+    ) {
+        (
+            &mut self.glfw_backend,
+            &mut self.glow_backend,
+            &self.egui_context,
+        )
+    }
+
+    fn gui_run(&mut self) {
+        let ctx = self.egui_context.clone();
+
+        // process all pending messages in the queue each frame of the GUI
+        while let Ok(m) = self.rx.try_recv() {
+            match m {
+                Message::Stop => {
+                    log::info!("Gui: received a `Stop` message");
+                    self.close();
+                    return;
+                }
+                Message::UpdateOwnship(kind) => self.aircraft_name = aircraft_display_name(kind),
+                Message::UpdateStartupProgress(progress) => self.startup_progress = progress,
+                Message::UpdateStartupText(s) => self.startup_text = s,
+            }
+        }
+        self.glfw_backend.window.set_floating(self.is_on_top);
+
+        egui::CentralPanel::default().show(&ctx, |ui| {
+            ui.heading("DCS YAWE");
+            ui.separator();
+            ui.horizontal(|ui| {
+                ui.label("Aircraft type:");
+                ui.label(self.aircraft_name);
+            });
+            ui.separator();
+            ui.horizontal(|ui| {
+                ui.label("Autostart");
+                if (ui.button("Start")).clicked() {
+                    let _ = self.tx.send(app::AppMessage::StartupAircraft);
+                }
+
+                ui.add(
+                    egui::ProgressBar::new(self.startup_progress)
+                        .text(self.startup_text.as_str())
+                        .animate(self.startup_progress > 0.0),
+                );
+            });
+            ui.separator();
+            ui.horizontal(|ui| {
+                ui.checkbox(&mut self.debug_widget_visible, "Debug panel");
+                ui.checkbox(&mut self.is_on_top, "Always on top");
+            });
+
+            if self.debug_widget_visible {
+                ui.separator();
+                self.make_debug_widget(ui);
+            }
+        });
+    }
+}
+
+fn do_gui(
+    rx: Receiver<Message>,
+    tx: Sender<app::AppMessage>,
+    to_dcs_gamegui: TaskSender<Lua>,
+    to_dcs_export: TaskSender<Lua>,
+    context: egui::Context,
+) {
+    log::info!("Starting gui");
+    let gui = Gui::new(rx, tx, to_dcs_gamegui, to_dcs_export, context);
+    <Gui as UserApp>::UserWindowBackend::run_event_loop(gui);
+
+    log::info!("Gui closed");
+}
+
 fn aircraft_display_name(kind: dcs::AircraftId) -> &'static str {
     match kind {
         dcs::AircraftId::F_16C_50 => "F-16C block 50",
@@ -122,8 +203,43 @@ fn aircraft_display_name(kind: dcs::AircraftId) -> &'static str {
 
 pub enum Message {
     Stop,
-    UpdateCanopyState(f32),
+    UpdateStartupProgress(f32),
     UpdateOwnship(dcs::AircraftId),
+    UpdateStartupText(String),
+}
+
+// Need a separate struct to abstract the subset of functionality that cannot be
+// sent across threads, since `Handle` contains a handle to the GUI thread.
+#[derive(Clone, Debug)]
+pub struct TxHandle {
+    context: egui::Context,
+    tx: Sender<Message>,
+}
+
+impl TxHandle {
+    pub fn set_ownship_type(&self, kind: dcs::AircraftId) -> Result<(), SendError<Message>> {
+        self.tx.send(Message::UpdateOwnship(kind))?;
+        self.context.request_repaint();
+        Ok(())
+    }
+
+    pub fn set_startup_progress(&self, progress: f32) {
+        let _ = self.tx.send(Message::UpdateStartupProgress(progress));
+        self.context.request_repaint();
+    }
+
+    pub fn set_startup_text(&self, text: &'static str) {
+        let _ = self.tx.send(Message::UpdateStartupText(String::from(text)));
+        self.context.request_repaint();
+    }
+}
+
+// Publicly-facing handle to GUI thread
+#[derive(Debug)]
+pub struct Handle {
+    tx: Sender<Message>,
+    thread: Option<std::thread::JoinHandle<()>>,
+    context: egui::Context,
 }
 
 impl Handle {
@@ -146,17 +262,23 @@ impl Handle {
         }
     }
 
-    pub fn set_ownship_type(&self, kind: dcs::AircraftId) -> Result<(), SendError<Message>> {
-        self.tx.send(Message::UpdateOwnship(kind))?;
-        self.context.request_repaint();
-        Ok(())
+    pub fn tx_handle(&self) -> TxHandle {
+        TxHandle {
+            context: self.context.clone(),
+            tx: self.tx.clone(),
+        }
     }
 
-    pub fn set_canopy_state(&self, state: f32) {
-        if let Err(e) = self.tx.send(Message::UpdateCanopyState(state)) {
-            log::warn!("Sending canopy state failed with {:?}", e);
-        };
-        self.context.request_repaint();
+    pub fn set_ownship_type(&self, kind: dcs::AircraftId) -> Result<(), SendError<Message>> {
+        self.tx_handle().set_ownship_type(kind)
+    }
+
+    pub fn _set_startup_progress(&self, progress: f32) {
+        self.tx_handle().set_startup_progress(progress)
+    }
+
+    pub fn _set_startup_text(&self, text: &'static str) {
+        self.tx_handle().set_startup_text(text)
     }
 
     pub fn stop(&mut self) {
@@ -177,70 +299,4 @@ impl Handle {
             None => false,
         }
     }
-}
-
-impl UserApp for Gui {
-    type UserGfxBackend = GlowBackend;
-    type UserWindowBackend = GlfwBackend;
-    fn get_all(
-        &mut self,
-    ) -> (
-        &mut Self::UserWindowBackend,
-        &mut Self::UserGfxBackend,
-        &egui::Context,
-    ) {
-        (
-            &mut self.glfw_backend,
-            &mut self.glow_backend,
-            &self.egui_context,
-        )
-    }
-
-    fn gui_run(&mut self) {
-        let ctx = self.egui_context.clone();
-        self.glfw_backend.window.set_floating(true);
-
-        // process all pending messages in the queue each frame of the GUI
-        while let Ok(m) = self.rx.try_recv() {
-            match m {
-                Message::Stop => {
-                    log::info!("Gui: received a `Stop` message");
-                    self.close();
-                    return;
-                }
-                Message::UpdateOwnship(kind) => self.aircraft_name = aircraft_display_name(kind),
-                Message::UpdateCanopyState(state) => self.canopy_state = state,
-            }
-        }
-
-        egui::CentralPanel::default().show(&ctx, |ui| {
-            ui.heading("DCS YAWE");
-            ui.horizontal(|ui| {
-                ui.label("Aircraft type:");
-                ui.label(self.aircraft_name);
-            });
-            if (ui.button("Start")).clicked() {
-                let _ = self.tx.send(app::AppMessage::StartupAircraft);
-            }
-            ui.horizontal(|ui| {
-                ui.label("Canopy State");
-                ui.add(egui::ProgressBar::new(self.canopy_state));
-            });
-            self.make_debug_widget(ui);
-        });
-    }
-}
-
-fn do_gui(
-    rx: Receiver<Message>,
-    tx: Sender<app::AppMessage>,
-    to_dcs_gamegui: TaskSender<Lua>,
-    to_dcs_export: TaskSender<Lua>,
-    context: egui::Context,
-) {
-    log::info!("Starting gui");
-    let gui = Gui::new(rx, tx, to_dcs_gamegui, to_dcs_export, context);
-    <Gui as UserApp>::UserWindowBackend::run_event_loop(gui);
-
-    log::info!("Gui closed");
 }

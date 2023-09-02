@@ -120,9 +120,7 @@ pub fn get_cockpit_param(lua: &Lua, param_name: &str) -> std::result::Result<f32
     let params = list_cockpit_params(lua).map_err(|e| Error::LuaError(e))?;
     let pattern = [param_name, ":"].join("");
 
-    let mut ii = 0;
     for line in params.split("\n") {
-        ii += 1;
         if line.trim().starts_with(&pattern) {
             let mut s = line.split(":");
             s.next();
