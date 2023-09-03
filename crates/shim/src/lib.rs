@@ -9,9 +9,11 @@ use windows::Win32::System::LibraryLoader::{FreeLibrary, GetProcAddress, LoadLib
 struct LibState {
     lib: HMODULE,
     start: ProcWrapper<extern "C" fn(&Lua, config::Config) -> i32>,
-    stop: ProcWrapper<extern "C" fn(&Lua) -> i32>,
     on_frame: ProcWrapper<extern "C" fn(&Lua) -> i32>,
     on_frame_export: ProcWrapper<extern "C" fn(&Lua) -> i32>,
+    on_simulation_pause: ProcWrapper<extern "C" fn(&Lua) -> i32>,
+    on_simulation_resume: ProcWrapper<extern "C" fn(&Lua) -> i32>,
+    stop: ProcWrapper<extern "C" fn(&Lua) -> i32>,
 }
 
 static mut LIB_STATE: Option<LibState> = None;
@@ -72,9 +74,11 @@ pub fn start(lua: &Lua, config: config::Config) -> LuaResult<i32> {
     let ls = Some(LibState {
         lib: lib,
         start: load_export(lib, b"start"),
-        stop: load_export(lib, b"stop"),
         on_frame: load_export(lib, b"on_frame"),
         on_frame_export: load_export(lib, b"on_frame_export"),
+        on_simulation_pause: load_export(lib, b"on_simulation_pause"),
+        on_simulation_resume: load_export(lib, b"on_simulation_resume"),
+        stop: load_export(lib, b"stop"),
     });
     unsafe { LIB_STATE = ls };
 
@@ -82,18 +86,6 @@ pub fn start(lua: &Lua, config: config::Config) -> LuaResult<i32> {
     let result = start(&lua, config);
 
     Ok(result)
-}
-
-#[no_mangle]
-pub fn stop(lua: &Lua, _: ()) -> LuaResult<i32> {
-    if !unsafe { LIB_STATE.is_some() } {
-        return Ok(-1);
-    }
-    let stop = unsafe { &LIB_STATE.as_ref().unwrap().stop };
-    let stop_result = stop(&lua);
-    log::info!("Stopping main library returned {:?}", stop_result);
-    let free_result = close_library();
-    Ok(free_result.as_bool().into())
 }
 
 #[no_mangle]
@@ -124,12 +116,52 @@ pub fn on_frame_export(lua: &Lua, _: ()) -> LuaResult<i32> {
     Ok(0)
 }
 
+#[no_mangle]
+pub fn on_simulation_pause(lua: &Lua, _: ()) -> LuaResult<i32> {
+    if !unsafe { LIB_STATE.is_some() } {
+        return Ok(-1);
+    }
+    let on_simulation_pause = unsafe { &LIB_STATE.as_ref().unwrap().on_simulation_pause };
+    let result = on_simulation_pause(&lua);
+    Ok(result)
+}
+
+#[no_mangle]
+pub fn on_simulation_resume(lua: &Lua, _: ()) -> LuaResult<i32> {
+    if !unsafe { LIB_STATE.is_some() } {
+        return Ok(-1);
+    }
+    let on_simulation_resume = unsafe { &LIB_STATE.as_ref().unwrap().on_simulation_resume };
+    let result = on_simulation_resume(&lua);
+    Ok(result)
+}
+
+#[no_mangle]
+pub fn stop(lua: &Lua, _: ()) -> LuaResult<i32> {
+    if !unsafe { LIB_STATE.is_some() } {
+        return Ok(-1);
+    }
+    let stop = unsafe { &LIB_STATE.as_ref().unwrap().stop };
+    let stop_result = stop(&lua);
+    log::info!("Stopping main library returned {:?}", stop_result);
+    let free_result = close_library();
+    Ok(free_result.as_bool().into())
+}
+
 #[mlua::lua_module]
 pub fn yawe_shim(lua: &Lua) -> LuaResult<LuaTable> {
     let exports = lua.create_table()?;
     exports.set("start", lua.create_function(start)?)?;
     exports.set("on_frame", lua.create_function(on_frame)?)?;
     exports.set("on_frame_export", lua.create_function(on_frame_export)?)?;
+    exports.set(
+        "on_simulation_pause",
+        lua.create_function(on_simulation_pause)?,
+    )?;
+    exports.set(
+        "on_simulation_resume",
+        lua.create_function(on_simulation_resume)?,
+    )?;
     exports.set("stop", lua.create_function(stop)?)?;
     Ok(exports)
 }

@@ -4,26 +4,28 @@ use mlua::Lua;
 use offload::{PackagedTask, TaskSender};
 use rsevents::Awaitable;
 use rsevents::{AutoResetEvent, EventState};
-use std::sync::mpsc::{channel, Receiver, Sender};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{channel, Receiver, Sender, TryRecvError};
 use std::thread::JoinHandle;
 
-pub struct App {
-    thread: Option<JoinHandle<()>>,
-    tx_to_app: Sender<AppMessage>,
-    gui: gui::Handle,
-    ownship_type: dcs::AircraftId,
-    rx_from_dcs_gamegui: Receiver<PackagedTask<Lua>>,
-    rx_from_dcs_export: Receiver<PackagedTask<Lua>>,
-}
-
 static AWAKEN_APP_THREAD: AutoResetEvent = AutoResetEvent::new(EventState::Unset);
+static STOP_APP_THREAD: AtomicBool = AtomicBool::new(false);
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum AppMessage {
     StartupAircraft,
     InterruptAircraftStart,
-    StopApp,
     None,
+}
+
+pub struct App {
+    thread: Option<JoinHandle<()>>,
+    _tx_to_app: Sender<AppMessage>,
+    gui: gui::Handle,
+    ownship_type: dcs::AircraftId,
+    rx_from_dcs_gamegui: Option<Receiver<PackagedTask<Lua>>>,
+    rx_from_dcs_export: Option<Receiver<PackagedTask<Lua>>>,
+    paused: bool,
 }
 
 impl App {
@@ -52,27 +54,35 @@ impl App {
 
         let me = Self {
             thread: Some(thread),
-            tx_to_app: tx_to_app.clone(),
+            _tx_to_app: tx_to_app.clone(),
             gui: gui,
             ownship_type: dcs::AircraftId::Unknown(String::from("")),
-            rx_from_dcs_export,
-            rx_from_dcs_gamegui,
+            rx_from_dcs_gamegui: Some(rx_from_dcs_gamegui),
+            rx_from_dcs_export: Some(rx_from_dcs_export),
+            paused: false,
         };
         me
     }
 
-    pub fn stop(&mut self) {
-        if let Err(e) = self.tx_to_app.send(AppMessage::StopApp) {
-            log::warn!(
-                "Warning, could not send Stop message to app thread, error was {:?}",
-                e
-            );
-        };
-        AWAKEN_APP_THREAD.set();
-        let thread_finish = std::mem::take(&mut self.thread);
-        self.gui.stop();
-        thread_finish.unwrap().join().unwrap();
-        log::info!("Main thread stopped");
+    fn set_paused(&mut self) {
+        self.paused = true;
+        self.gui.set_paused();
+    }
+
+    fn set_unpaused(&mut self) {
+        if !self.paused {
+            return;
+        }
+        self.paused = false;
+        self.gui.set_unpaused();
+    }
+
+    pub fn on_start(&mut self, lua: &Lua) -> i32 {
+        if dcs::is_paused(lua).unwrap_or(false) {
+            log::info!("Game is starting paused");
+            self.set_paused();
+        }
+        0
     }
 
     pub fn on_frame(&mut self, lua: &Lua) -> i32 {
@@ -85,15 +95,18 @@ impl App {
             log::info!("Got new aircraft type {:?}", ownship_type);
             self.ownship_type = ownship_type.clone();
             if self.gui.is_running() {
-                let result = self.gui.set_ownship_type(ownship_type);
-                if result.is_err() {
-                    self.gui.stop();
-                }
+                self.gui.set_ownship_type(ownship_type);
             }
         }
 
         // todo: implement timeout, but for now just process all pending messages ASAP.
-        while let Ok(_) = self.rx_from_dcs_gamegui.try_recv().map(|job| job(lua)) {}
+        while let Ok(_) = self
+            .rx_from_dcs_gamegui
+            .as_ref()
+            .unwrap()
+            .try_recv()
+            .map(|job| job(lua))
+        {}
         AWAKEN_APP_THREAD.set();
 
         if self.gui.is_running() {
@@ -105,8 +118,38 @@ impl App {
 
     pub fn on_frame_export(&mut self, lua: &Lua) -> i32 {
         // todo: implement timeout, but for now just process all pending messages ASAP.
-        while let Ok(_) = self.rx_from_dcs_export.try_recv().map(|job| job(lua)) {}
+        while let Ok(_) = self
+            .rx_from_dcs_export
+            .as_ref()
+            .unwrap()
+            .try_recv()
+            .map(|job| job(lua))
+        {}
         0
+    }
+
+    pub fn on_simulation_pause(&mut self, _lua: &Lua) -> i32 {
+        log::info!("Simulation paused");
+        self.set_paused();
+        0
+    }
+    pub fn on_simulation_resume(&mut self, _lua: &Lua) -> i32 {
+        log::info!("Simulation resumed");
+        self.set_unpaused();
+        0
+    }
+
+    pub fn stop(&mut self) {
+        log::info!("Signaling app thread to stop");
+        self.rx_from_dcs_gamegui = None;
+        self.rx_from_dcs_export = None;
+        STOP_APP_THREAD.store(true, Ordering::SeqCst);
+        AWAKEN_APP_THREAD.set();
+        let thread_finish = std::mem::take(&mut self.thread);
+        self.gui.stop();
+        log::info!("joining on thread finishing");
+        thread_finish.unwrap().join().unwrap();
+        log::info!("App thread stopped");
     }
 }
 
@@ -125,13 +168,21 @@ fn app_thread_entry(
     let mut fsm = dcs::mig21bis::Fsm::new(sender_to_dcs_gamegui, sender_to_dcs_export, gui_handle);
     loop {
         AWAKEN_APP_THREAD.wait();
-        if let Ok(msg) = rx_from_gui.try_recv() {
-            if msg == AppMessage::StopApp {
-                return;
+
+        if STOP_APP_THREAD.load(Ordering::SeqCst) {
+            log::info!("stopping app thread!");
+            return;
+        }
+        match rx_from_gui.try_recv() {
+            Ok(msg) => fsm.run(msg),
+            Err(e) => {
+                if let TryRecvError::Disconnected = e {
+                    log::info!("stopping app thread via disconnected");
+                    return;
+                } else {
+                    fsm.run(AppMessage::None);
+                }
             }
-            fsm.run(msg);
-        } else {
-            fsm.run(AppMessage::None);
         }
     }
 }

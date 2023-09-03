@@ -67,10 +67,18 @@ do
         YAWE.lib.on_frame()
     end
 
-    function yaweCallbacks.onPlayerConnect(id)
+    function yaweCallbacks.onSimulationPause()
+        if not YAWE.lib then
+            return
+        end
+        YAWE.lib.on_simulation_pause()
     end
 
-    function yaweCallbacks.onPlayerDisconnect(id, err_code)
+    function yaweCallbacks.onSimulationResume()
+        if not YAWE.lib then
+            return
+        end
+        YAWE.lib.on_simulation_resume()
     end
 
     DCS.setUserCallbacks(yaweCallbacks)

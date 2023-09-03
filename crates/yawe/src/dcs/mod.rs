@@ -136,3 +136,9 @@ pub fn get_cockpit_param(lua: &Lua, param_name: &str) -> std::result::Result<f32
     }
     return Err(Error::IndexError);
 }
+
+pub fn is_paused(lua: &Lua) -> LuaResult<bool> {
+    let dcs: LuaTable = lua.globals().get("DCS")?;
+    let get_pause: LuaFunction = dcs.get("getPause")?;
+    get_pause.call(())
+}

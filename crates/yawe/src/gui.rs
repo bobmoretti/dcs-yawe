@@ -21,6 +21,7 @@ struct Gui {
     is_on_top: bool,
     debug_widget_visible: bool,
     startup_text: String,
+    paused: bool,
 }
 
 impl Gui {
@@ -53,6 +54,7 @@ impl Gui {
             is_on_top: true,
             debug_widget_visible: false,
             startup_text: String::default(),
+            paused: false,
         }
     }
 
@@ -122,6 +124,8 @@ impl UserApp for Gui {
                 Message::UpdateOwnship(kind) => self.aircraft_name = aircraft_display_name(kind),
                 Message::UpdateStartupProgress(progress) => self.startup_progress = progress,
                 Message::UpdateStartupText(s) => self.startup_text = s,
+                Message::Paused => self.paused = true,
+                Message::Unpaused => self.paused = false,
             }
         }
         self.glfw_backend.window.set_floating(self.is_on_top);
@@ -136,7 +140,9 @@ impl UserApp for Gui {
             ui.separator();
             ui.horizontal(|ui| {
                 ui.label("Autostart");
-                if (ui.button("Start")).clicked() {
+                let enabled = !self.paused;
+                let start_button = ui.add_enabled(enabled, egui::Button::new("Start"));
+                if start_button.clicked() {
                     let _ = self.tx.send(app::AppMessage::StartupAircraft);
                 }
 
@@ -201,11 +207,13 @@ fn aircraft_display_name(kind: dcs::AircraftId) -> &'static str {
     }
 }
 
-pub enum Message {
+enum Message {
     Stop,
     UpdateStartupProgress(f32),
     UpdateOwnship(dcs::AircraftId),
     UpdateStartupText(String),
+    Paused,
+    Unpaused,
 }
 
 // Need a separate struct to abstract the subset of functionality that cannot be
@@ -217,10 +225,9 @@ pub struct TxHandle {
 }
 
 impl TxHandle {
-    pub fn set_ownship_type(&self, kind: dcs::AircraftId) -> Result<(), SendError<Message>> {
-        self.tx.send(Message::UpdateOwnship(kind))?;
+    pub fn set_ownship_type(&self, kind: dcs::AircraftId) {
+        let _ = self.tx.send(Message::UpdateOwnship(kind));
         self.context.request_repaint();
-        Ok(())
     }
 
     pub fn set_startup_progress(&self, progress: f32) {
@@ -230,6 +237,16 @@ impl TxHandle {
 
     pub fn set_startup_text(&self, text: &'static str) {
         let _ = self.tx.send(Message::UpdateStartupText(String::from(text)));
+        self.context.request_repaint();
+    }
+
+    pub fn set_paused(&self) {
+        let _ = self.tx.send(Message::Paused);
+        self.context.request_repaint();
+    }
+
+    pub fn set_unpaused(&self) {
+        let _ = self.tx.send(Message::Unpaused);
         self.context.request_repaint();
     }
 }
@@ -272,8 +289,8 @@ impl Handle {
         }
     }
 
-    pub fn set_ownship_type(&self, kind: dcs::AircraftId) -> Result<(), SendError<Message>> {
-        self.tx_handle().set_ownship_type(kind)
+    pub fn set_ownship_type(&self, kind: dcs::AircraftId) {
+        let _ = self.tx_handle().set_ownship_type(kind);
     }
 
     pub fn _set_startup_progress(&self, progress: f32) {
@@ -282,6 +299,14 @@ impl Handle {
 
     pub fn _set_startup_text(&self, text: &'static str) {
         self.tx_handle().set_startup_text(text)
+    }
+
+    pub fn set_paused(&self) {
+        self.tx_handle().set_paused()
+    }
+
+    pub fn set_unpaused(&self) {
+        self.tx_handle().set_unpaused()
     }
 
     pub fn stop(&mut self) {

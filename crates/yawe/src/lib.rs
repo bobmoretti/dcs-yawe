@@ -1,3 +1,4 @@
+use dcs::is_paused;
 use mlua::prelude::{LuaFunction, LuaTable};
 use mlua::Lua;
 use std::string::String;
@@ -42,16 +43,7 @@ pub fn start(lua: &Lua, mut config: config::Config) -> i32 {
             main_app: app::App::new(),
         });
     }
-    0
-}
-
-#[no_mangle]
-pub fn stop(_lua: &Lua) -> i32 {
-    get_lib_state().main_app.stop();
-    unsafe {
-        LIB_STATE = None;
-    }
-    0
+    get_lib_state().main_app.on_start(lua)
 }
 
 #[no_mangle]
@@ -62,4 +54,24 @@ pub fn on_frame(lua: &Lua) -> i32 {
 #[no_mangle]
 pub fn on_frame_export(lua: &Lua) -> i32 {
     get_lib_state().main_app.on_frame_export(&lua)
+}
+
+#[no_mangle]
+pub fn on_simulation_pause(lua: &Lua) -> i32 {
+    get_lib_state().main_app.on_simulation_pause(&lua)
+}
+
+#[no_mangle]
+pub fn on_simulation_resume(lua: &Lua) -> i32 {
+    get_lib_state().main_app.on_simulation_resume(&lua)
+}
+
+#[no_mangle]
+pub fn stop(_lua: &Lua) -> i32 {
+    log::info!("stop!!");
+    get_lib_state().main_app.stop();
+    unsafe {
+        LIB_STATE = None;
+    }
+    0
 }
