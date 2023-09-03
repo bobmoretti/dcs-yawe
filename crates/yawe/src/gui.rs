@@ -2,11 +2,21 @@ use crate::app;
 use crate::dcs;
 use egui_backend::{egui, BackendConfig, GfxBackend, UserApp, WindowBackend};
 use egui_render_glow::GlowBackend;
+use egui_window_glfw_passthrough::glfw;
+use egui_window_glfw_passthrough::glfw::Context;
 use egui_window_glfw_passthrough::GlfwBackend;
 use mlua::Lua;
 use offload::TaskSender;
 use std::sync::mpsc::{self, Receiver, SendError, Sender};
-
+use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, POINTS, RECT, WPARAM};
+use windows::Win32::Graphics::Gdi::ScreenToClient;
+use windows::Win32::UI::WindowsAndMessaging::HTRIGHT;
+use windows::Win32::UI::WindowsAndMessaging::{
+    GetClientRect, GetWindowLongPtrW, GetWindowRect, SetWindowLongPtrW, SetWindowPos, GWLP_WNDPROC,
+    GWL_STYLE, HTBOTTOM, HTBOTTOMLEFT, HTBOTTOMRIGHT, HTCAPTION, HTLEFT, HTTOP, HTTOPLEFT,
+    HTTOPRIGHT, NCCALCSIZE_PARAMS, SWP_FRAMECHANGED, SWP_NOMOVE, WM_NCACTIVATE, WM_NCCALCSIZE,
+    WM_NCHITTEST, WM_NCPAINT, WNDPROC, WS_CAPTION, WS_THICKFRAME,
+};
 struct Gui {
     rx: Receiver<Message>,
     tx: Sender<app::AppMessage>,
@@ -24,6 +34,115 @@ struct Gui {
     paused: bool,
 }
 
+// The following hackery is based on the thread:
+// https://reddit.com/r/opengl/comments/13x3sw0/custom_title_bar_with_glfw/
+
+// this needs to be global (I don't think there is any other way to get it into
+// an extern "C" function)
+static mut GLFW_PROC: WNDPROC = None;
+
+fn hit_test(
+    mouse_pos: &POINT,
+    window_rect: &RECT,
+    hwnd: HWND,
+    msg: u32,
+    wparam: WPARAM,
+    lparam: LPARAM,
+) -> LRESULT {
+    let border_width = 8;
+    let caption_height = 32;
+    if mouse_pos.y >= window_rect.bottom - border_width {
+        if mouse_pos.x <= border_width {
+            return LRESULT(HTBOTTOMLEFT as isize);
+        } else if mouse_pos.x >= window_rect.right - border_width {
+            return LRESULT(HTBOTTOMRIGHT as isize);
+        } else {
+            return LRESULT(HTBOTTOM as isize);
+        }
+    } else if mouse_pos.y <= border_width {
+        if mouse_pos.x <= border_width {
+            return LRESULT(HTTOPLEFT as isize);
+        } else if mouse_pos.x >= window_rect.right - border_width {
+            return LRESULT(HTTOPRIGHT as isize);
+        } else {
+            return LRESULT(HTTOP as isize);
+        }
+    } else if mouse_pos.y <= border_width + caption_height {
+        return LRESULT(HTCAPTION as isize);
+    } else if mouse_pos.x <= border_width {
+        return LRESULT(HTLEFT as isize);
+    } else if mouse_pos.x >= window_rect.right - border_width {
+        return LRESULT(HTRIGHT as isize);
+    }
+    unsafe { GLFW_PROC.unwrap()(hwnd, msg, wparam, lparam) }
+}
+
+unsafe extern "system" fn modified_proc(
+    hwnd: HWND,
+    msg: u32,
+    wparam: WPARAM,
+    lparam: LPARAM,
+) -> LRESULT {
+    match msg {
+        WM_NCCALCSIZE => {
+            if wparam.0 == 1 && lparam.0 != 0 {
+                let params = lparam.0 as *mut NCCALCSIZE_PARAMS;
+                (*params).rgrc[0].top += 1;
+                (*params).rgrc[0].right -= 1;
+                (*params).rgrc[0].bottom -= 1;
+                (*params).rgrc[0].left += 1;
+            }
+            LRESULT(0)
+        }
+        WM_NCHITTEST => {
+            let x: i16 = (lparam.0 & 0xFFFF).try_into().unwrap();
+            let y: i16 = ((lparam.0 >> 16) & 0xFFFF).try_into().unwrap();
+            let mouse_pos = POINTS { x, y };
+            let mut client_mouse_pos = POINT {
+                x: mouse_pos.x as i32,
+                y: mouse_pos.y as i32,
+            };
+            ScreenToClient(hwnd, &mut client_mouse_pos as *mut POINT);
+            let mut window_rect = RECT::default();
+            GetClientRect(hwnd, &mut window_rect as *mut RECT);
+            let result = hit_test(&client_mouse_pos, &window_rect, hwnd, msg, wparam, lparam);
+            result
+        }
+        WM_NCPAINT => LRESULT(0),
+        WM_NCACTIVATE => LRESULT(0),
+        _ => GLFW_PROC.unwrap()(hwnd, msg, wparam, lparam),
+    }
+}
+
+fn disable_titlebar(window: &glfw::Window) {
+    let window_handle = unsafe { HWND(glfw::ffi::glfwGetWin32Window(window.window_ptr()) as _) };
+    let mut style = unsafe { GetWindowLongPtrW(window_handle, GWL_STYLE) };
+    style |= WS_THICKFRAME.0 as isize;
+    style &= !WS_CAPTION.0 as isize;
+    unsafe { SetWindowLongPtrW(window_handle, GWL_STYLE, style) };
+    let mut rect: RECT = RECT::default();
+    unsafe { GetWindowRect(window_handle, &mut rect) };
+    let width = rect.right - rect.left;
+    let height = rect.bottom - rect.top;
+
+    let raw = unsafe { GetWindowLongPtrW(window_handle, GWLP_WNDPROC) };
+    unsafe {
+        GLFW_PROC = Some(std::mem::transmute(raw));
+    };
+    unsafe { SetWindowLongPtrW(window_handle, GWLP_WNDPROC, modified_proc as isize) };
+    unsafe {
+        SetWindowPos(
+            window_handle,
+            HWND(0 as isize),
+            0,
+            0,
+            width,
+            height,
+            SWP_FRAMECHANGED | SWP_NOMOVE,
+        )
+    };
+}
+
 impl Gui {
     pub fn new(
         rx: Receiver<Message>,
@@ -33,6 +152,10 @@ impl Gui {
         context: egui::Context,
     ) -> Self {
         let mut glfw_backend = GlfwBackend::new(Default::default(), BackendConfig::default());
+        glfw_backend.window.set_decorated(false);
+        glfw_backend.window.set_title("DCS YAWE");
+        disable_titlebar(&glfw_backend.window);
+
         // creating gfx backend. It uses Window backend to load things like fn pointers
         // or window handle for swapchain etc.. behind the scenes.
         let glow_backend = GlowBackend::new(&mut glfw_backend, Default::default());
@@ -129,6 +252,7 @@ impl UserApp for Gui {
             }
         }
         self.glfw_backend.window.set_floating(self.is_on_top);
+        self.glfw_backend.window.set_decorated(false);
 
         egui::CentralPanel::default().show(&ctx, |ui| {
             ui.heading("DCS YAWE");
