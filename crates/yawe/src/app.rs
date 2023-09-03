@@ -43,9 +43,12 @@ impl App {
 
         let handle = gui.tx_handle();
 
-        let thread = std::thread::spawn(move || {
-            app_thread_entry(tx_to_dcs_gamegui, tx_to_dcs_export, handle, rx_from_gui)
-        });
+        let thread = std::thread::Builder::new()
+            .name("yawe-app".to_string())
+            .spawn(move || {
+                app_thread_entry(tx_to_dcs_gamegui, tx_to_dcs_export, handle, rx_from_gui)
+            })
+            .unwrap();
 
         let me = Self {
             thread: Some(thread),

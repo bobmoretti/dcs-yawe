@@ -252,9 +252,12 @@ impl Handle {
         let tx_clone = tx.clone();
         let context = egui::Context::default();
         let context_clone = context.clone();
-        let thread = std::thread::spawn(move || {
-            do_gui(rx, tx_to_app, to_dcs_gamegui, to_dcs_export, context);
-        });
+        let thread = std::thread::Builder::new()
+            .name("yawe-gui".to_string())
+            .spawn(move || {
+                do_gui(rx, tx_to_app, to_dcs_gamegui, to_dcs_export, context);
+            })
+            .unwrap();
         Handle {
             tx: tx_clone,
             thread: Some(thread),

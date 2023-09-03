@@ -53,6 +53,12 @@ fn setup_logging(config: &config::Config, mut console: File) -> Result<(), fern:
 
     fern::Dispatch::new()
         .format(move |out, message, record| {
+            let handle = std::thread::current();
+            let result = handle.name();
+            let thread_id = match result {
+                Some(name) => name.to_string(),
+                None => thread_id::get().to_string(),
+            };
             out.finish(format_args!(
                 "{color_line}[{date}][{thread_id}][{target}][{level}{color_line}] {message}\x1B[0m",
                 color_line = format_args!(
@@ -60,7 +66,7 @@ fn setup_logging(config: &config::Config, mut console: File) -> Result<(), fern:
                     colors_line.get_color(&record.level()).to_fg_str()
                 ),
                 date = chrono::Local::now().format("%Y-%m-%d %H:%M:%S"),
-                thread_id = thread_id::get(),
+                thread_id = thread_id,
                 target = record.target(),
                 level = colors_level.color(record.level()),
                 message = message,
