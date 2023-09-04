@@ -22,7 +22,7 @@ struct Gui {
     tx: Sender<app::AppMessage>,
     to_dcs_gamegui: TaskSender<Lua>,
     _to_dcs_export: TaskSender<Lua>,
-    aircraft_name: &'static str,
+    aircraft_name: String,
     startup_progress: f32,
     pub egui_context: egui::Context,
     pub glow_backend: GlowBackend,
@@ -164,7 +164,7 @@ impl Gui {
             tx: tx,
             to_dcs_gamegui,
             _to_dcs_export: to_dcs_export,
-            aircraft_name: "",
+            aircraft_name: String::from(""),
             startup_progress: 0.0,
             glfw_backend: glfw_backend,
             glow_backend: glow_backend,
@@ -259,7 +259,7 @@ impl UserApp for Gui {
             ui.separator();
             ui.horizontal(|ui| {
                 ui.label("Aircraft type:");
-                ui.label(self.aircraft_name);
+                ui.label(self.aircraft_name.as_str());
             });
             ui.separator();
             ui.horizontal(|ui| {
@@ -304,30 +304,30 @@ fn do_gui(
     log::info!("Gui closed");
 }
 
-fn aircraft_display_name(kind: dcs::AircraftId) -> &'static str {
+fn aircraft_display_name(kind: dcs::AircraftId) -> String {
     match kind {
-        dcs::AircraftId::F_16C_50 => "F-16C block 50",
-        dcs::AircraftId::A_10C => "A-10C",
-        dcs::AircraftId::A_10C_2 => "A-10C II",
-        dcs::AircraftId::AH_64D_BLK_II => "AH-64D Apache",
-        dcs::AircraftId::AJS37 => "AJS37 Viggen",
-        dcs::AircraftId::AV8BNA => "AV8BNA Harrier",
-        dcs::AircraftId::F_14B => "F-14B Tomcat",
-        dcs::AircraftId::F_15ESE => "F-15E Strike Eagle",
-        dcs::AircraftId::F_15ESE_WSO => "F-15E Strike Eagle (WSO)",
-        dcs::AircraftId::FA_18C_hornet => "F/A-18C Hornet",
-        dcs::AircraftId::M_2000C => "Mirage 2000C",
-        dcs::AircraftId::Mi_24P => "Mi-24P \"Hind E\"",
-        dcs::AircraftId::Mi_8MT => "Mi-8MT \"Hip\"",
-        dcs::AircraftId::Mi_8MT_Copilot => "Mi-8MT \"Hip\" (Copilot)",
-        dcs::AircraftId::Mi_8MT_FO => "Mi-8MT \"Hip\" (First Officer)",
-        dcs::AircraftId::MiG_21Bis => "MiG-21Bis",
-        dcs::AircraftId::SA342L => "SA342L Gazelle",
-        dcs::AircraftId::Su_25 => "Su-25 \"Frogfoot\"",
-        dcs::AircraftId::Su_25T => "Su-25T \"Frogfoot\"",
-        dcs::AircraftId::UH_1H => "UH-1H Huey",
+        dcs::AircraftId::F_16C_50 => String::from("F-16C block 50"),
+        dcs::AircraftId::A_10C => String::from("A-10C"),
+        dcs::AircraftId::A_10C_2 => String::from("A-10C II"),
+        dcs::AircraftId::AH_64D_BLK_II => String::from("AH-64D Apache"),
+        dcs::AircraftId::AJS37 => String::from("AJS37 Viggen"),
+        dcs::AircraftId::AV8BNA => String::from("AV8BNA Harrier"),
+        dcs::AircraftId::F_14B => String::from("F-14B Tomcat"),
+        dcs::AircraftId::F_15ESE => String::from("F-15E Strike Eagle"),
+        dcs::AircraftId::F_15ESE_WSO => String::from("F-15E Strike Eagle (WSO)"),
+        dcs::AircraftId::FA_18C_hornet => String::from("F/A-18C Hornet"),
+        dcs::AircraftId::M_2000C => String::from("Mirage 2000C"),
+        dcs::AircraftId::Mi_24P => String::from("Mi-24P \"Hind E\""),
+        dcs::AircraftId::Mi_8MT => String::from("Mi-8MT \"Hip\""),
+        dcs::AircraftId::Mi_8MT_Copilot => String::from("Mi-8MT \"Hip\" (Copilot)"),
+        dcs::AircraftId::Mi_8MT_FO => String::from("Mi-8MT \"Hip\" (First Officer)"),
+        dcs::AircraftId::MiG_21Bis => String::from("MiG-21Bis"),
+        dcs::AircraftId::SA342L => String::from("SA342L Gazelle"),
+        dcs::AircraftId::Su_25 => String::from("Su-25 \"Frogfoot\""),
+        dcs::AircraftId::Su_25T => String::from("Su-25T \"Frogfoot\""),
+        dcs::AircraftId::UH_1H => String::from("UH-1H Huey"),
         // TODO: this is a hack
-        dcs::AircraftId::Unknown(s) => s.leak(),
+        dcs::AircraftId::Unknown(s) => s,
     }
 }
 
