@@ -95,8 +95,8 @@ unsafe extern "system" fn modified_proc(
             LRESULT(0)
         }
         WM_NCHITTEST => {
-            let x: i16 = (lparam.0 & 0xFFFF).try_into().unwrap();
-            let y: i16 = ((lparam.0 >> 16) & 0xFFFF).try_into().unwrap();
+            let x: i16 = (lparam.0 & 0xFFFF) as i16;
+            let y: i16 = ((lparam.0 >> 16) & 0xFFFF) as i16;
             let mouse_pos = POINTS { x, y };
             let mut client_mouse_pos = POINT {
                 x: mouse_pos.x as i32,
