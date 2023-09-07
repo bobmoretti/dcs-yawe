@@ -192,21 +192,21 @@ fn app_thread_entry(
         match rx_from_gui.try_recv() {
             Ok(msg) => match msg {
                 AppMessage::AircraftChanged(aircraft) => {
-                    fsm = dcs::get_fsm(
+                    fsm = dcs::get_aircraft(
                         aircraft,
                         sender_to_dcs_gamegui.clone(),
                         sender_to_dcs_export.clone(),
                         gui_handle.clone(),
                     )
                 }
-                AppMessage::FsmEvent(fsm_msg) => fsm.run(fsm_msg),
+                AppMessage::FsmEvent(fsm_msg) => fsm.run_fsm(fsm_msg),
             },
             Err(e) => {
                 if let TryRecvError::Disconnected = e {
                     log::info!("stopping app thread via disconnected");
                     return;
                 } else {
-                    fsm.run(FsmMessage::None);
+                    fsm.run_fsm(FsmMessage::None);
                 }
             }
         }

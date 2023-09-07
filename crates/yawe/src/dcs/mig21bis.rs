@@ -1,5 +1,6 @@
 use crate::app::FsmMessage;
 use crate::dcs;
+use egui_backend::egui;
 use mlua::prelude::LuaResult;
 use mlua::Lua;
 use offload::TaskSender;
@@ -67,24 +68,15 @@ pub enum Switch {
     NppAdjust,
     NumSwitches,
 }
-
-#[derive(Debug, Copy, Clone)]
-pub enum SwitchType {
-    Toggle,
-    Momentary,
-    Indicator,
-    MultiToggle,
-}
+type St = crate::dcs::SwitchType;
 
 pub struct SwitchInfo {
     pub switch: Switch,
     pub device_id: i32,
     pub command: i32,
     pub argument: i32,
-    pub switch_type: SwitchType,
+    pub switch_type: St,
 }
-
-type St = SwitchType;
 
 pub const SWITCH_INFO_MAP: [SwitchInfo; Switch::NumSwitches as usize] = [
     SwitchInfo::new(Switch::FuelPump1, 4, 3011, 160, St::Toggle),
@@ -159,7 +151,7 @@ impl SwitchInfo {
         device_id: i32,
         command: i32,
         argument: i32,
-        switch_type: SwitchType,
+        switch_type: crate::dcs::SwitchType,
     ) -> Self {
         Self {
             switch: _switch,
@@ -241,7 +233,7 @@ pub struct Fsm {
 }
 
 impl dcs::AircraftFsm for Fsm {
-    fn run(&mut self, event: FsmMessage) {
+    fn run_fsm(&mut self, event: FsmMessage) {
         match self.state {
             StartupState::ColdDark => self.cold_dark_handler(event),
             StartupState::WaitCanopyClosed => self.wait_canopy_closed(event),
@@ -448,4 +440,30 @@ impl Fsm {
             .send(|lua| set_switch_state(lua, Switch::NppAdjust, 0.0))
             .wait();
     }
+}
+
+pub fn make_debug_widget(ui: &mut egui::Ui, strings: &mut Vec<String>, tx: &TaskSender<Lua>) {
+    egui::Grid::new("debug_grid").show(ui, |ui| {
+        for (ii, &ref switch_info) in SWITCH_INFO_MAP.iter().enumerate() {
+            let s: &'static str = switch_info.switch.into();
+            ui.label(s);
+            let val = &mut (strings[ii]);
+            if ui.button("Set").clicked() {
+                let result = val.parse::<f32>();
+                if let Ok(state) = result {
+                    let _ = tx.send(move |lua| set_switch_state(lua, switch_info.switch, state));
+                }
+            }
+            if ui.button("Get").clicked() {
+                let result = tx
+                    .send(|lua| get_switch_state(lua, switch_info.switch))
+                    .wait();
+                if let Ok(state) = result {
+                    val.replace_range(.., state.unwrap_or_default().to_string().as_str());
+                }
+            }
+            ui.add(egui::TextEdit::singleline(val));
+            ui.end_row();
+        }
+    });
 }

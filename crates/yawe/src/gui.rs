@@ -22,7 +22,7 @@ struct Gui {
     tx: Sender<app::AppMessage>,
     to_dcs_gamegui: TaskSender<Lua>,
     _to_dcs_export: TaskSender<Lua>,
-    aircraft_name: String,
+    aircraft_type: dcs::AircraftId,
     startup_progress: f32,
     pub egui_context: egui::Context,
     pub glow_backend: GlowBackend,
@@ -164,7 +164,7 @@ impl Gui {
             tx: tx,
             to_dcs_gamegui,
             _to_dcs_export: to_dcs_export,
-            aircraft_name: String::from(""),
+            aircraft_type: dcs::AircraftId::Unknown("".to_string()),
             startup_progress: 0.0,
             glfw_backend: glfw_backend,
             glow_backend: glow_backend,
@@ -187,32 +187,12 @@ impl Gui {
 
     fn make_debug_widget(&mut self, ui: &mut egui::Ui) {
         ui.label("Debug switches:");
-        egui::Grid::new("debug_grid").show(ui, |ui| {
-            for (ii, &ref switch_info) in dcs::mig21bis::SWITCH_INFO_MAP.iter().enumerate() {
-                let s: &'static str = switch_info.switch.into();
-                ui.label(s);
-                let val = &mut (self.switch_vals[ii]);
-                if ui.button("Set").clicked() {
-                    let result = val.parse::<f32>();
-                    if let Ok(state) = result {
-                        let _ = self.to_dcs_gamegui.send(move |lua| {
-                            dcs::mig21bis::set_switch_state(lua, switch_info.switch, state)
-                        });
-                    }
-                }
-                if ui.button("Get").clicked() {
-                    let result = self
-                        .to_dcs_gamegui
-                        .send(|lua| dcs::mig21bis::get_switch_state(lua, switch_info.switch))
-                        .wait();
-                    if let Ok(state) = result {
-                        val.replace_range(.., state.unwrap_or_default().to_string().as_str());
-                    }
-                }
-                ui.add(egui::TextEdit::singleline(val));
-                ui.end_row();
+        match self.aircraft_type {
+            dcs::AircraftId::MiG_21Bis => {
+                dcs::mig21bis::make_debug_widget(ui, &mut self.switch_vals, &self.to_dcs_gamegui)
             }
-        });
+            _ => (),
+        };
     }
 }
 
@@ -252,7 +232,7 @@ impl UserApp for Gui {
                     let mut v = Vec::with_capacity(num_switches as usize);
                     v.resize(num_switches as usize, String::new());
                     self.switch_vals = v;
-                    self.aircraft_name = aircraft_display_name(kind);
+                    self.aircraft_type = kind;
                 }
                 Message::UpdateStartupProgress(progress) => self.startup_progress = progress,
                 Message::UpdateStartupText(s) => self.startup_text = s,
@@ -268,7 +248,8 @@ impl UserApp for Gui {
             ui.separator();
             ui.horizontal(|ui| {
                 ui.label("Aircraft type:");
-                ui.label(self.aircraft_name.as_str());
+                let name = aircraft_display_name(&self.aircraft_type);
+                ui.label(name.as_str());
             });
             ui.separator();
             ui.horizontal(|ui| {
@@ -315,7 +296,7 @@ fn do_gui(
     log::info!("Gui closed");
 }
 
-fn aircraft_display_name(kind: dcs::AircraftId) -> String {
+fn aircraft_display_name(kind: &dcs::AircraftId) -> String {
     match kind {
         dcs::AircraftId::F_16C_50 => String::from("F-16C block 50"),
         dcs::AircraftId::A_10C => String::from("A-10C"),
@@ -338,7 +319,7 @@ fn aircraft_display_name(kind: dcs::AircraftId) -> String {
         dcs::AircraftId::Su_25T => String::from("Su-25T \"Frogfoot\""),
         dcs::AircraftId::UH_1H => String::from("UH-1H Huey"),
         // TODO: this is a hack
-        dcs::AircraftId::Unknown(s) => s,
+        dcs::AircraftId::Unknown(s) => s.to_string(),
     }
 }
 

@@ -7,8 +7,16 @@ use mlua::Lua;
 use offload::TaskSender;
 use std::str::FromStr;
 
+#[derive(Debug, Copy, Clone)]
+pub enum SwitchType {
+    Toggle,
+    Momentary,
+    Indicator,
+    MultiToggle,
+}
+
 pub trait AircraftFsm {
-    fn run(&mut self, msg: FsmMessage);
+    fn run_fsm(&mut self, msg: FsmMessage);
 }
 
 #[derive(PartialEq, Debug, Clone)]
@@ -65,7 +73,7 @@ fn str_to_ship_enum(name: &str) -> AircraftId {
 
 pub struct EmptyFsm {}
 impl AircraftFsm for EmptyFsm {
-    fn run(&mut self, _: FsmMessage) {}
+    fn run_fsm(&mut self, _: FsmMessage) {}
 }
 
 impl EmptyFsm {
@@ -74,7 +82,7 @@ impl EmptyFsm {
     }
 }
 
-pub fn get_fsm(
+pub fn get_aircraft(
     aircraft: AircraftId,
     to_gamegui: TaskSender<Lua>,
     to_export: TaskSender<Lua>,
