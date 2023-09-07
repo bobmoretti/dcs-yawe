@@ -1,4 +1,3 @@
-use dcs::is_paused;
 use mlua::prelude::{LuaFunction, LuaTable};
 use mlua::Lua;
 use std::string::String;

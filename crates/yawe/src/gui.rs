@@ -7,7 +7,7 @@ use egui_window_glfw_passthrough::glfw::Context;
 use egui_window_glfw_passthrough::GlfwBackend;
 use mlua::Lua;
 use offload::TaskSender;
-use std::sync::mpsc::{self, Receiver, SendError, Sender};
+use std::sync::mpsc::{self, Receiver, Sender};
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, POINTS, RECT, WPARAM};
 use windows::Win32::Graphics::Gdi::ScreenToClient;
 use windows::Win32::UI::WindowsAndMessaging::HTRIGHT;
@@ -244,7 +244,16 @@ impl UserApp for Gui {
                     self.close();
                     return;
                 }
-                Message::UpdateOwnship(kind) => self.aircraft_name = aircraft_display_name(kind),
+                Message::UpdateOwnship(kind) => {
+                    let num_switches = match kind {
+                        dcs::AircraftId::MiG_21Bis => dcs::mig21bis::Switch::NumSwitches as usize,
+                        _ => 0 as usize,
+                    };
+                    let mut v = Vec::with_capacity(num_switches as usize);
+                    v.resize(num_switches as usize, String::new());
+                    self.switch_vals = v;
+                    self.aircraft_name = aircraft_display_name(kind);
+                }
                 Message::UpdateStartupProgress(progress) => self.startup_progress = progress,
                 Message::UpdateStartupText(s) => self.startup_text = s,
                 Message::Paused => self.paused = true,
@@ -267,7 +276,9 @@ impl UserApp for Gui {
                 let enabled = !self.paused;
                 let start_button = ui.add_enabled(enabled, egui::Button::new("Start"));
                 if start_button.clicked() {
-                    let _ = self.tx.send(app::AppMessage::StartupAircraft);
+                    let _ = self
+                        .tx
+                        .send(app::AppMessage::FsmEvent(app::FsmMessage::StartupAircraft));
                 }
 
                 ui.add(

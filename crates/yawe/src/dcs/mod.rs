@@ -1,10 +1,15 @@
 pub mod mig21bis;
 
+use crate::app::FsmMessage;
 use crate::Error;
-use std::str::FromStr;
-
 use mlua::prelude::{LuaFunction, LuaResult, LuaTable};
 use mlua::Lua;
+use offload::TaskSender;
+use std::str::FromStr;
+
+pub trait AircraftFsm {
+    fn run(&mut self, msg: FsmMessage);
+}
 
 #[derive(PartialEq, Debug, Clone)]
 #[allow(non_camel_case_types)]
@@ -55,6 +60,29 @@ fn str_to_ship_enum(name: &str) -> AircraftId {
         "Su-25T" => AircraftId::Su_25T,
         "UH-1H" => AircraftId::UH_1H,
         _ => AircraftId::Unknown(String::from_str(name).unwrap()),
+    }
+}
+
+pub struct EmptyFsm {}
+impl AircraftFsm for EmptyFsm {
+    fn run(&mut self, _: FsmMessage) {}
+}
+
+impl EmptyFsm {
+    pub fn new(_: TaskSender<Lua>, _: TaskSender<Lua>, _: crate::gui::TxHandle) -> Self {
+        Self {}
+    }
+}
+
+pub fn get_fsm(
+    aircraft: AircraftId,
+    to_gamegui: TaskSender<Lua>,
+    to_export: TaskSender<Lua>,
+    gui: crate::gui::TxHandle,
+) -> Box<dyn AircraftFsm> {
+    match aircraft {
+        AircraftId::MiG_21Bis => Box::new(mig21bis::Fsm::new(to_gamegui, to_export, gui)),
+        _ => Box::new(EmptyFsm::new(to_gamegui, to_export, gui)),
     }
 }
 

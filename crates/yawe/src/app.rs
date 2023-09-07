@@ -1,4 +1,5 @@
 use crate::dcs;
+use crate::dcs::AircraftFsm;
 use crate::gui;
 use mlua::Lua;
 use offload::{PackagedTask, TaskSender};
@@ -11,11 +12,17 @@ use std::thread::JoinHandle;
 static AWAKEN_APP_THREAD: AutoResetEvent = AutoResetEvent::new(EventState::Unset);
 static STOP_APP_THREAD: AtomicBool = AtomicBool::new(false);
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum AppMessage {
+#[derive(Debug, Copy, Clone, PartialEq)]
+pub enum FsmMessage {
     StartupAircraft,
-    InterruptAircraftStart,
+    _InterruptAircraftStart,
     None,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum AppMessage {
+    AircraftChanged(dcs::AircraftId),
+    FsmEvent(FsmMessage),
 }
 
 pub struct App {
@@ -95,8 +102,11 @@ impl App {
             log::info!("Got new aircraft type {:?}", ownship_type);
             self.ownship_type = ownship_type.clone();
             if self.gui.is_running() {
-                self.gui.set_ownship_type(ownship_type);
+                self.gui.set_ownship_type(ownship_type.clone());
             }
+            let _ = self
+                ._tx_to_app
+                .send(AppMessage::AircraftChanged(ownship_type));
         }
 
         // todo: implement timeout, but for now just process all pending messages ASAP.
@@ -165,7 +175,13 @@ fn app_thread_entry(
     gui_handle: gui::TxHandle,
     rx_from_gui: Receiver<AppMessage>,
 ) {
-    let mut fsm = dcs::mig21bis::Fsm::new(sender_to_dcs_gamegui, sender_to_dcs_export, gui_handle);
+    // need to dispatch between several
+    let mut fsm: Box<dyn AircraftFsm> = Box::new(dcs::EmptyFsm::new(
+        sender_to_dcs_gamegui.clone(),
+        sender_to_dcs_export.clone(),
+        gui_handle.clone(),
+    ));
+
     loop {
         AWAKEN_APP_THREAD.wait();
 
@@ -174,13 +190,23 @@ fn app_thread_entry(
             return;
         }
         match rx_from_gui.try_recv() {
-            Ok(msg) => fsm.run(msg),
+            Ok(msg) => match msg {
+                AppMessage::AircraftChanged(aircraft) => {
+                    fsm = dcs::get_fsm(
+                        aircraft,
+                        sender_to_dcs_gamegui.clone(),
+                        sender_to_dcs_export.clone(),
+                        gui_handle.clone(),
+                    )
+                }
+                AppMessage::FsmEvent(fsm_msg) => fsm.run(fsm_msg),
+            },
             Err(e) => {
                 if let TryRecvError::Disconnected = e {
                     log::info!("stopping app thread via disconnected");
                     return;
                 } else {
-                    fsm.run(AppMessage::None);
+                    fsm.run(FsmMessage::None);
                 }
             }
         }

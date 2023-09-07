@@ -113,7 +113,7 @@ pub fn on_frame_export(lua: &Lua, _: ()) -> LuaResult<i32> {
 
     let on_frame = &maybe_lib_state.unwrap().on_frame_export;
     let result = on_frame(&lua);
-    Ok(0)
+    Ok(result)
 }
 
 #[no_mangle]

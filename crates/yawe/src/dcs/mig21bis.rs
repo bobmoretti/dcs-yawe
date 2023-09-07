@@ -1,3 +1,4 @@
+use crate::app::FsmMessage;
 use crate::dcs;
 use mlua::prelude::LuaResult;
 use mlua::Lua;
@@ -85,7 +86,7 @@ pub struct SwitchInfo {
 
 type St = SwitchType;
 
-pub static SWITCH_INFO_MAP: [SwitchInfo; Switch::NumSwitches as usize] = [
+pub const SWITCH_INFO_MAP: [SwitchInfo; Switch::NumSwitches as usize] = [
     SwitchInfo::new(Switch::FuelPump1, 4, 3011, 160, St::Toggle),
     SwitchInfo::new(Switch::FuelPump3, 4, 3010, 159, St::Toggle),
     SwitchInfo::new(Switch::FuelPumpDrain, 4, 3012, 161, St::Toggle),
@@ -143,6 +144,7 @@ pub static SWITCH_INFO_MAP: [SwitchInfo; Switch::NumSwitches as usize] = [
     SwitchInfo::new(Switch::NppAdjust, 23, 3143, 258, St::Momentary),
 ];
 
+#[derive(Clone, PartialEq, Debug)]
 enum StartupState {
     ColdDark,
     WaitCanopyClosed,
@@ -230,11 +232,24 @@ fn handle_polling_err(r: &Result<f32, crate::Error>) {
     }
 }
 
+#[derive(Debug, Clone)]
 pub struct Fsm {
     state: StartupState,
     to_dcs_gamegui: TaskSender<Lua>,
     to_dcs_export: TaskSender<Lua>,
     gui: crate::gui::TxHandle,
+}
+
+impl dcs::AircraftFsm for Fsm {
+    fn run(&mut self, event: FsmMessage) {
+        match self.state {
+            StartupState::ColdDark => self.cold_dark_handler(event),
+            StartupState::WaitCanopyClosed => self.wait_canopy_closed(event),
+            StartupState::WaitEngineStartBegun => self.wait_engine_start_begun(event),
+            StartupState::WaitEngineStartComplete => self.wait_engine_start_complete(event),
+            StartupState::Done => self.done(event),
+        }
+    }
 }
 
 impl Fsm {
@@ -250,18 +265,9 @@ impl Fsm {
             gui,
         }
     }
-    pub fn run(&mut self, event: crate::app::AppMessage) {
-        match self.state {
-            StartupState::ColdDark => self.cold_dark_handler(event),
-            StartupState::WaitCanopyClosed => self.wait_canopy_closed(event),
-            StartupState::WaitEngineStartBegun => self.wait_engine_start_begun(event),
-            StartupState::WaitEngineStartComplete => self.wait_engine_start_complete(event),
-            StartupState::Done => self.done(event),
-        }
-    }
-    fn cold_dark_handler(&mut self, event: crate::app::AppMessage) {
+    fn cold_dark_handler(&mut self, event: crate::app::FsmMessage) {
         match event {
-            crate::app::AppMessage::StartupAircraft => {
+            crate::app::FsmMessage::StartupAircraft => {
                 // this should cause the progress bar to begin animating
                 self.gui.set_startup_progress(0.001);
                 self.gui.set_startup_text("Setting up initial switches");
@@ -274,7 +280,7 @@ impl Fsm {
             _ => {}
         }
     }
-    fn wait_canopy_closed(&mut self, _event: crate::app::AppMessage) {
+    fn wait_canopy_closed(&mut self, _event: crate::app::FsmMessage) {
         let r = self
             .to_dcs_export
             .send(|lua| get_cockpit_param(lua, "BASE_SENSOR_CANOPY_POS"))
@@ -308,7 +314,7 @@ impl Fsm {
         }
     }
 
-    fn wait_engine_start_begun(&mut self, _event: crate::app::AppMessage) {
+    fn wait_engine_start_begun(&mut self, _event: crate::app::FsmMessage) {
         let result = poll_argument(&self.to_dcs_gamegui, Switch::EngineStartLight);
         if result.is_err() {
             handle_polling_err(&result);
@@ -330,7 +336,7 @@ impl Fsm {
         self.state = StartupState::WaitEngineStartComplete;
     }
 
-    fn wait_engine_start_complete(&mut self, _event: crate::app::AppMessage) {
+    fn wait_engine_start_complete(&mut self, _event: crate::app::FsmMessage) {
         let result = poll_argument(&self.to_dcs_gamegui, Switch::EngineStartLight);
         if result.is_err() {
             handle_polling_err(&result);
@@ -351,7 +357,7 @@ impl Fsm {
         self.state = StartupState::Done;
     }
 
-    fn done(&mut self, _event: crate::app::AppMessage) {}
+    fn done(&mut self, _event: crate::app::FsmMessage) {}
 
     fn throw_initial_switches(&self) {
         let _ = self
