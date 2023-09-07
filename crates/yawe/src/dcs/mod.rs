@@ -15,6 +15,32 @@ pub enum SwitchType {
     MultiToggle,
 }
 
+pub struct SwitchInfo<SwitchT> {
+    pub switch: SwitchT,
+    pub device_id: i32,
+    pub command: i32,
+    pub argument: i32,
+    pub switch_type: SwitchType,
+}
+
+impl<SwitchT> SwitchInfo<SwitchT> {
+    pub const fn new(
+        switch: SwitchT,
+        device_id: i32,
+        command: i32,
+        argument: i32,
+        switch_type: crate::dcs::SwitchType,
+    ) -> Self {
+        Self {
+            switch: switch,
+            device_id,
+            command,
+            argument,
+            switch_type,
+        }
+    }
+}
+
 pub trait AircraftFsm {
     fn run_fsm(&mut self, msg: FsmMessage);
 }
