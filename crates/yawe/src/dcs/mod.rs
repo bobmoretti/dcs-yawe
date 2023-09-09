@@ -1,3 +1,4 @@
+pub mod f16c50;
 pub mod mig21bis;
 
 use crate::app::FsmMessage;
@@ -7,36 +8,20 @@ use mlua::Lua;
 use offload::TaskSender;
 use std::str::FromStr;
 
-#[derive(Debug, Copy, Clone)]
-pub enum SwitchType {
-    Toggle,
-    Momentary,
-    Indicator,
-    MultiToggle,
-}
-
 pub struct SwitchInfo<SwitchT> {
     pub switch: SwitchT,
     pub device_id: i32,
     pub command: i32,
     pub argument: i32,
-    pub switch_type: SwitchType,
 }
 
 impl<SwitchT> SwitchInfo<SwitchT> {
-    pub const fn new(
-        switch: SwitchT,
-        device_id: i32,
-        command: i32,
-        argument: i32,
-        switch_type: crate::dcs::SwitchType,
-    ) -> Self {
+    pub const fn new(switch: SwitchT, device_id: i32, command: i32, argument: i32) -> Self {
         Self {
             switch: switch,
             device_id,
             command,
             argument,
-            switch_type,
         }
     }
 }
@@ -116,6 +101,7 @@ pub fn get_aircraft(
 ) -> Box<dyn AircraftFsm> {
     match aircraft {
         AircraftId::MiG_21Bis => Box::new(mig21bis::Fsm::new(to_gamegui, to_export, gui)),
+        AircraftId::F_16C_50 => Box::new(f16c50::Fsm::new(to_gamegui, to_export, gui)),
         _ => Box::new(EmptyFsm::new(to_gamegui, to_export, gui)),
     }
 }

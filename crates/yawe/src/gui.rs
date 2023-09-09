@@ -227,6 +227,7 @@ impl UserApp for Gui {
                 Message::UpdateOwnship(kind) => {
                     let num_switches = match kind {
                         dcs::AircraftId::MiG_21Bis => dcs::mig21bis::Switch::NumSwitches as usize,
+                        dcs::AircraftId::F_16C_50 => dcs::f16c50::Switch::NumSwitches as usize,
                         _ => 0 as usize,
                     };
                     let mut v = Vec::with_capacity(num_switches as usize);
