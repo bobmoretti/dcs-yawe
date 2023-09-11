@@ -206,6 +206,7 @@ pub fn get_sim_time(lua: &Lua) -> LuaResult<f32> {
     get_model_time.call(())
 }
 
+#[allow(unused)]
 pub enum LockonCommand {
     LeftEngineStart = 311,
     RightEngineStart = 312,
@@ -217,4 +218,9 @@ pub fn set_lockon_command(lua: &Lua, command: LockonCommand) -> LuaResult<()> {
     let export: LuaTable = lua.globals().get("Export")?;
     let send_command: LuaFunction = export.get("LoSetCommand")?;
     send_command.call(command as i32)
+}
+
+pub fn list_indication(lua: &Lua, device: i32) -> LuaResult<String> {
+    let list_indication: LuaFunction = lua.globals().get("list_indication")?;
+    list_indication.call(device)
 }

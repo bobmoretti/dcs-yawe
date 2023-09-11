@@ -9,15 +9,23 @@ use strum::IntoStaticStr;
 
 type Si = SwitchInfo<Switch>;
 enum Info {
+    Toggle(SwitchInfo<Switch>),
     MultiToggle(SwitchInfo<Switch>),
     Momentary(SwitchInfo<Switch>),
     SpringLoaded3Pos(SpringLoaded3PosInfo),
     FloatValue(SwitchInfo<Switch>),
+    Axis(SwitchInfo<Switch>),
 }
 
 enum ThreePosState {
     Down,
     Stop,
+    Up,
+}
+
+enum ThreePosToggleState {
+    Down,
+    Middle,
     Up,
 }
 
@@ -35,6 +43,33 @@ pub enum Switch {
     CanopyValue,
     CanopyLock,
     EngineTachometer,
+    MmcPower,
+    StoresStationPower,
+    MfdPower,
+    UfcPower,
+    GpsPower,
+    MapPower,
+    DlPower,
+    MidsLvtControl,
+    LeftHardpointPower,
+    RightHardpointPower,
+    FcrPower,
+    RadAltPower,
+    IffMasterKnob,
+    UhfFunctionKnob,
+    CmdsPower,
+    CmdsJammerPower,
+    CmdsMwsPower,
+    CmdsExpendable1Power,
+    CmdsExpendable2Power,
+    CmdsExpendable3Power,
+    CmdsExpendable4Power,
+    CmdsProgramKnob,
+    CmdsModeKnob,
+    HudBrightnessKnob,
+    HmdIntensityKnob,
+    LaserArm,
+    RwrPower,
     NumSwitches,
 }
 
@@ -51,17 +86,45 @@ const SWITCH_INFO_MAP: [Info; Switch::NumSwitches as usize] = [
     Info::FloatValue(Si::new_float(Switch::CanopyValue, 7)),
     Info::MultiToggle(Si::new(Switch::CanopyLock, 10, 3004, 600)),
     Info::FloatValue(Si::new_float(Switch::EngineTachometer, 95)),
+    Info::Toggle(Si::new(Switch::MmcPower, 19, 3001, 715)),
+    Info::Toggle(Si::new(Switch::StoresStationPower, 22, 3001, 716)),
+    Info::Toggle(Si::new(Switch::MfdPower, 19, 3014, 717)),
+    Info::Toggle(Si::new(Switch::UfcPower, 17, 3001, 718)),
+    Info::Toggle(Si::new(Switch::GpsPower, 59, 3001, 720)),
+    Info::Toggle(Si::new(Switch::MapPower, 61, 3001, 722)),
+    Info::Toggle(Si::new(Switch::DlPower, 60, 3001, 721)),
+    Info::MultiToggle(Si::new(Switch::MidsLvtControl, 41, 3001, 723)),
+    Info::Toggle(Si::new(Switch::LeftHardpointPower, 22, 3002, 670)),
+    Info::Toggle(Si::new(Switch::RightHardpointPower, 22, 3003, 671)),
+    Info::Toggle(Si::new(Switch::FcrPower, 31, 3001, 672)),
+    Info::Toggle(Si::new(Switch::RadAltPower, 15, 3001, 673)),
+    Info::MultiToggle(Si::new(Switch::IffMasterKnob, 35, 3002, 540)),
+    Info::MultiToggle(Si::new(Switch::UhfFunctionKnob, 37, 3008, 417)),
+    Info::Toggle(Si::new(Switch::CmdsPower, 32, 3001, 375)),
+    Info::Toggle(Si::new(Switch::CmdsJammerPower, 32, 3002, 374)),
+    Info::Toggle(Si::new(Switch::CmdsMwsPower, 32, 3003, 373)),
+    Info::Toggle(Si::new(Switch::CmdsExpendable1Power, 32, 3005, 365)),
+    Info::Toggle(Si::new(Switch::CmdsExpendable2Power, 32, 3006, 366)),
+    Info::Toggle(Si::new(Switch::CmdsExpendable3Power, 32, 3007, 367)),
+    Info::Toggle(Si::new(Switch::CmdsExpendable4Power, 32, 3008, 368)),
+    Info::MultiToggle(Si::new(Switch::CmdsProgramKnob, 32, 3009, 377)),
+    Info::MultiToggle(Si::new(Switch::CmdsModeKnob, 32, 3010, 378)),
+    Info::Axis(Si::new(Switch::HudBrightnessKnob, 17, 3022, 190)),
+    Info::Axis(Si::new(Switch::HmdIntensityKnob, 30, 3001, 392)),
+    Info::Toggle(Si::new(Switch::LaserArm, 22, 3004, 103)),
+    Info::Toggle(Si::new(Switch::RwrPower, 33, 3011, 401)),
 ];
 
 #[allow(unreachable_patterns)]
 fn get_switch_info(s: Switch) -> Option<&'static Si> {
     let info = &SWITCH_INFO_MAP[s as usize];
     match info {
+        Info::Toggle(i) => Some(i),
         Info::MultiToggle(i) => Some(i),
         Info::Momentary(i) => Some(i),
         Info::FloatValue(i) => Some(i),
         Info::SpringLoaded3Pos(i) => Some(&i.info),
-        _ => None,
+        Info::Axis(i) => Some(i),
     }
 }
 
@@ -159,6 +222,48 @@ fn handle_polling_err(r: &Result<f32, crate::Error>) {
     }
 }
 
+fn throw_initial_switches(tx: &TaskSender<Lua>) {
+    let _ = tx
+        .send(|lua| {
+            let switch_states = [
+                (Switch::MmcPower, 1.0),
+                (Switch::StoresStationPower, 1.0),
+                (Switch::MfdPower, 1.0),
+                (Switch::UfcPower, 1.0),
+                (Switch::MapPower, 1.0),
+                (Switch::GpsPower, 1.0),
+                (Switch::DlPower, 1.0),
+                (Switch::LeftHardpointPower, 1.0),
+                (Switch::RightHardpointPower, 1.0),
+                (Switch::FcrPower, 1.0),
+                (Switch::RadAltPower, 1.0),
+                (Switch::CmdsPower, 1.0),
+                (Switch::CmdsJammerPower, 1.0),
+                (Switch::CmdsMwsPower, 1.0),
+                (Switch::CmdsExpendable1Power, 1.0),
+                (Switch::CmdsExpendable2Power, 1.0),
+                (Switch::CmdsExpendable3Power, 1.0),
+                (Switch::CmdsExpendable4Power, 1.0),
+                (Switch::MidsLvtControl, 0.2),
+                (Switch::IffMasterKnob, 0.3),
+                (Switch::UhfFunctionKnob, 0.2),
+                (Switch::CmdsProgramKnob, 0.1),
+                (Switch::CmdsModeKnob, 0.2),
+                (Switch::HudBrightnessKnob, 1.0),
+                (Switch::HmdIntensityKnob, 1.0),
+                (Switch::LaserArm, 1.0),
+                (Switch::RwrPower, 1.0),
+            ];
+            for (switch, state) in switch_states {
+                let _ = set_switch_state(lua, switch, state);
+            }
+            let _ = set_switch_state(lua, Switch::MidsLvtControl, 0.2);
+            let _ = set_switch_state(lua, Switch::IffMasterKnob, 0.3);
+        })
+        .wait()
+        .map_err(|_| crate::Error::CommError);
+}
+
 #[derive(Default, Debug, PartialEq, Clone)]
 struct Timer {
     start_time: f32,
@@ -195,7 +300,7 @@ enum StartupState {
 pub struct Fsm {
     state: StartupState,
     to_gamegui: TaskSender<Lua>,
-    to_dcs_export: TaskSender<Lua>,
+    to_export: TaskSender<Lua>,
     gui: crate::gui::TxHandle,
     sim_time: f32,
     canopy_timer: Timer,
@@ -227,7 +332,7 @@ impl Fsm {
         Self {
             state: StartupState::ColdDark,
             to_gamegui: to_dcs_gamegui,
-            to_dcs_export,
+            to_export: to_dcs_export,
             gui,
             sim_time: 0.0,
             canopy_timer: Timer::default(),
@@ -247,6 +352,7 @@ impl Fsm {
                         set_three_pos_springloaded(lua, Switch::CanopyRetract, ThreePosState::Down);
                     let _ = set_three_pos_springloaded(lua, Switch::Jfs, ThreePosState::Down);
                 });
+                throw_initial_switches(&self.to_gamegui);
                 self.state = StartupState::WaitCanopyClosed;
             }
             _ => {}
@@ -373,6 +479,7 @@ impl Fsm {
             .send(|lua| set_lockon_command(lua, LockonCommand::LeftEngineStart))
             .wait();
     }
+
     fn wait_engine_start_complete(&self, event: crate::app::FsmMessage) {}
     fn done(&self, event: crate::app::FsmMessage) {}
 }
