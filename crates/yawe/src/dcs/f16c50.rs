@@ -1,8 +1,7 @@
 #![allow(dead_code)]
 #![allow(unused_variables)]
-use super::SwitchInfo;
 use crate::app::FsmMessage;
-use crate::dcs;
+use crate::dcs::{self, set_lockon_command, LockonCommand, SwitchInfo};
 use mlua::prelude::LuaResult;
 use mlua::Lua;
 use offload::TaskSender;
@@ -35,6 +34,7 @@ pub enum Switch {
     CanopyRetract,
     CanopyValue,
     CanopyLock,
+    EngineTachometer,
     NumSwitches,
 }
 
@@ -50,6 +50,7 @@ const SWITCH_INFO_MAP: [Info; Switch::NumSwitches as usize] = [
     }),
     Info::FloatValue(Si::new_float(Switch::CanopyValue, 7)),
     Info::MultiToggle(Si::new(Switch::CanopyLock, 10, 3004, 600)),
+    Info::FloatValue(Si::new_float(Switch::EngineTachometer, 95)),
 ];
 
 #[allow(unreachable_patterns)]
@@ -342,10 +343,36 @@ impl Fsm {
         if canopy_lock_lever_state < 1.0 {
             return;
         }
-        self.gui.set_startup_text("Canopy locked");
+        self.gui.set_startup_text("Waiting for JFS");
+        self.state = StartupState::WaitJfsSpool;
     }
 
-    fn wait_jfs_spool(&self, event: crate::app::FsmMessage) {}
+    fn wait_jfs_spool(&self, event: crate::app::FsmMessage) {
+        let Ok(lua_result) = self
+            .to_gamegui
+            .send(|lua| get_switch_state(lua, Switch::EngineTachometer))
+            .wait()
+        else {
+            return;
+        };
+
+        let Ok(engine_rpm_normalized) = lua_result else {
+            log::warn!("Couldn't read engine RPM");
+            return;
+        };
+
+        const ENGINE_START_THRESHOLD: f32 = 0.12;
+
+        if engine_rpm_normalized < 0.12 {
+            return;
+        }
+
+        self.gui.set_startup_text("Waiting for engine to spool");
+        let _ = self
+            .to_gamegui
+            .send(|lua| set_lockon_command(lua, LockonCommand::LeftEngineStart))
+            .wait();
+    }
     fn wait_engine_start_complete(&self, event: crate::app::FsmMessage) {}
     fn done(&self, event: crate::app::FsmMessage) {}
 }

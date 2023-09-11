@@ -205,3 +205,16 @@ pub fn get_sim_time(lua: &Lua) -> LuaResult<f32> {
     let get_model_time: LuaFunction = dcs.get("getModelTime")?;
     get_model_time.call(())
 }
+
+pub enum LockonCommand {
+    LeftEngineStart = 311,
+    RightEngineStart = 312,
+    LeftEngineStop = 313,
+    RightEngineStop = 314,
+}
+
+pub fn set_lockon_command(lua: &Lua, command: LockonCommand) -> LuaResult<()> {
+    let export: LuaTable = lua.globals().get("Export")?;
+    let send_command: LuaFunction = export.get("LoSetCommand")?;
+    send_command.call(command as i32)
+}
