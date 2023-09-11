@@ -7,12 +7,15 @@ use mlua::Lua;
 use offload::TaskSender;
 use strum::IntoStaticStr;
 
+use super::perform_click;
+
 type Si = SwitchInfo<Switch>;
 enum Info {
     Toggle(SwitchInfo<Switch>),
     MultiToggle(SwitchInfo<Switch>),
     Momentary(SwitchInfo<Switch>),
     SpringLoaded3Pos(SpringLoaded3PosInfo),
+    DualCommand3Pos(DualCommand3PosInfo),
     FloatValue(SwitchInfo<Switch>),
     Axis(SwitchInfo<Switch>),
 }
@@ -32,6 +35,13 @@ enum ThreePosToggleState {
 struct SpringLoaded3PosInfo {
     pub info: Si,
     pub command_up: i32,
+}
+
+struct DualCommand3PosInfo {
+    pub device_id: i32,
+    pub command_up: i32,
+    pub command_down: i32,
+    pub argument: i32,
 }
 
 #[derive(Debug, Clone, Copy, IntoStaticStr)]
@@ -72,6 +82,7 @@ pub enum Switch {
     RwrPower,
     SaiCage,
     SaiPitchTrim,
+    AntiSkid,
     NumSwitches,
 }
 
@@ -117,6 +128,12 @@ const SWITCH_INFO_MAP: [Info; Switch::NumSwitches as usize] = [
     Info::Toggle(Si::new(Switch::RwrPower, 33, 3011, 401)),
     Info::Momentary(Si::new(Switch::SaiCage, 47, 3002, 67)),
     Info::Axis(Si::new(Switch::SaiPitchTrim, 47, 3003, 66)),
+    Info::DualCommand3Pos(DualCommand3PosInfo {
+        device_id: 7,
+        command_up: 3010,
+        command_down: 3004,
+        argument: 357,
+    }),
 ];
 
 #[allow(unreachable_patterns)]
@@ -129,6 +146,7 @@ fn get_switch_info(s: Switch) -> Option<&'static Si> {
         Info::FloatValue(i) => Some(i),
         Info::SpringLoaded3Pos(i) => Some(&i.info),
         Info::Axis(i) => Some(i),
+        Info::DualCommand3Pos(_) => None,
     }
 }
 
@@ -204,6 +222,28 @@ fn set_three_pos_springloaded(lua: &Lua, s: Switch, state: ThreePosState) -> Lua
     Ok(())
 }
 
+fn set_three_pos(lua: &Lua, s: Switch, state: ThreePosToggleState) -> LuaResult<()> {
+    let Info::DualCommand3Pos(info) = &SWITCH_INFO_MAP[s as usize] else {
+        log::warn!(
+            "Tried to interpret {:?} as a three pos springloaded switch, but it is not",
+            s
+        );
+        return LuaResult::Ok(());
+    };
+
+    match state {
+        ThreePosToggleState::Down => perform_click(lua, info.device_id, info.command_down, -1.0),
+        ThreePosToggleState::Middle => {
+            perform_click(lua, info.device_id, info.command_down, 0.0)?;
+            perform_click(lua, info.device_id, info.command_up, -1.0)
+        }
+        ThreePosToggleState::Up => {
+            perform_click(lua, info.device_id, info.command_down, 1.0)?;
+            perform_click(lua, info.device_id, info.command_up, 0.0)
+        }
+    }
+}
+
 fn poll_argument(to_gamegui: &TaskSender<Lua>, switch: Switch) -> Result<f32, crate::Error> {
     to_gamegui
         .send(move |lua| get_switch_state(lua, switch))
@@ -261,8 +301,7 @@ fn throw_initial_switches(tx: &TaskSender<Lua>) {
             for (switch, state) in switch_states {
                 let _ = set_switch_state(lua, switch, state);
             }
-            let _ = set_switch_state(lua, Switch::MidsLvtControl, 0.2);
-            let _ = set_switch_state(lua, Switch::IffMasterKnob, 0.3);
+            let _ = set_three_pos(lua, Switch::AntiSkid, ThreePosToggleState::Middle);
         })
         .wait()
         .map_err(|_| crate::Error::CommError);
@@ -329,14 +368,14 @@ impl dcs::AircraftFsm for Fsm {
 
 impl Fsm {
     pub fn new(
-        to_dcs_gamegui: TaskSender<Lua>,
-        to_dcs_export: TaskSender<Lua>,
+        to_gamegui: TaskSender<Lua>,
+        to_export: TaskSender<Lua>,
         gui: crate::gui::TxHandle,
     ) -> Self {
         Self {
             state: StartupState::ColdDark,
-            to_gamegui: to_dcs_gamegui,
-            to_export: to_dcs_export,
+            to_gamegui,
+            to_export,
             gui,
             sim_time: 0.0,
             canopy_timer: Timer::default(),
