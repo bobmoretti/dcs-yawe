@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 #![allow(unused_variables)]
 use crate::app::FsmMessage;
-use crate::dcs::{self, set_lockon_command, LockonCommand, SwitchInfo};
+use crate::dcs::{self, list_indication, set_lockon_command, LockonCommand, SwitchInfo};
 use mlua::prelude::LuaResult;
 use mlua::Lua;
 use offload::TaskSender;
@@ -83,6 +83,8 @@ pub enum Switch {
     SaiCage,
     SaiPitchTrim,
     AntiSkid,
+    EjectionSafety,
+    AltimeterModeLever,
     NumSwitches,
 }
 
@@ -133,6 +135,11 @@ const SWITCH_INFO_MAP: [Info; Switch::NumSwitches as usize] = [
         command_up: 3010,
         command_down: 3004,
         argument: 357,
+    }),
+    Info::Toggle(Si::new(Switch::EjectionSafety, 10, 3009, 785)),
+    Info::SpringLoaded3Pos(SpringLoaded3PosInfo {
+        info: Si::new(Switch::AltimeterModeLever, 45, 3002, 60),
+        command_up: 3001,
     }),
 ];
 
@@ -266,6 +273,14 @@ fn handle_polling_err(r: &Result<f32, crate::Error>) {
     }
 }
 
+enum IndicationDevice {
+    Ufc = 6,
+}
+
+fn get_avionics_indication(lua: &Lua, device: IndicationDevice) -> LuaResult<String> {
+    list_indication(lua, device as i32)
+}
+
 fn throw_initial_switches(tx: &TaskSender<Lua>) {
     let _ = tx
         .send(|lua| {
@@ -297,6 +312,7 @@ fn throw_initial_switches(tx: &TaskSender<Lua>) {
                 (Switch::HmdIntensityKnob, 1.0),
                 (Switch::LaserArm, 1.0),
                 (Switch::RwrPower, 1.0),
+                (Switch::EjectionSafety, 1.0),
             ];
             for (switch, state) in switch_states {
                 let _ = set_switch_state(lua, switch, state);
@@ -334,7 +350,7 @@ enum StartupState {
     WaitCanopySwitchRelease,
     WaitCanopyLocked,
     WaitJfsSpool,
-    WaitEngineStartComplete,
+    WaitGeneratorsRunning,
     WaitInsAligned,
     Done,
 }
@@ -359,7 +375,7 @@ impl dcs::AircraftFsm for Fsm {
             StartupState::WaitCanopySwitchRelease => self.wait_canopy_switch_released(event),
             StartupState::WaitCanopyLocked => self.wait_canopy_locked(event),
             StartupState::WaitJfsSpool => self.wait_jfs_spool(event),
-            StartupState::WaitEngineStartComplete => self.wait_engine_start_complete(event),
+            StartupState::WaitGeneratorsRunning => self.wait_generators_running(event),
             StartupState::Done => self.done(event),
             StartupState::WaitInsAligned => todo!(),
         }
@@ -424,7 +440,7 @@ impl Fsm {
         // is reported at 0, and the aircraft seems to have a hidden/internal state that
         // keeps track of how far "after fully closed" the canopy can be. Use a timer to
         // continue holding down the canopy close switch for a few more seconds.
-        self.canopy_timer = Timer::new(3.0, self.sim_time);
+        self.canopy_timer = Timer::new(2.3, self.sim_time);
         self.gui
             .set_startup_text("Waiting for canopy to fully close");
 
@@ -461,7 +477,7 @@ impl Fsm {
             log::warn!("Polling canopy switch position failed!");
             return;
         };
-        log::info!("Canopy switch state: {canopy_switch_state}");
+        log::debug!("Canopy switch state: {canopy_switch_state}");
 
         if canopy_switch_state < 0.0 {
             return;
@@ -528,13 +544,36 @@ impl Fsm {
                 let _ = set_switch_state(lua, Switch::SaiPitchTrim, 0.504);
             })
             .wait();
-        let _ = self
-            .to_gamegui
-            .send(|lua| set_switch_state(lua, Switch::SaiCage, 0.0));
+        let _ = self.to_gamegui.send(|lua| {
+            let _ = set_switch_state(lua, Switch::SaiCage, 0.0);
+            let _ =
+                set_three_pos_springloaded(lua, Switch::AltimeterModeLever, ThreePosState::Down);
+        });
 
-        self.state = StartupState::Done;
+        self.state = StartupState::WaitGeneratorsRunning;
     }
 
-    fn wait_engine_start_complete(&self, event: crate::app::FsmMessage) {}
+    fn wait_generators_running(&mut self, event: crate::app::FsmMessage) {
+        let Ok(lua_result) = self
+            .to_export
+            .send(|lua| get_avionics_indication(lua, IndicationDevice::Ufc))
+            .wait()
+        else {
+            return;
+        };
+        let Ok(indication) = lua_result else {
+            log::warn!("Couldn't get list indication when waiting for engine start");
+            return;
+        };
+        if indication.is_empty() {
+            return;
+        }
+
+        self.to_gamegui.send(|lua| {
+            let _ =
+                set_three_pos_springloaded(lua, Switch::AltimeterModeLever, ThreePosState::Stop);
+        });
+        self.state = StartupState::Done;
+    }
     fn done(&self, event: crate::app::FsmMessage) {}
 }
