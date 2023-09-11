@@ -24,10 +24,19 @@ impl<SwitchT> SwitchInfo<SwitchT> {
             argument,
         }
     }
+
+    pub const fn new_float(switch: SwitchT, argument: i32) -> Self {
+        Self {
+            switch,
+            device_id: 0,
+            command: 0,
+            argument,
+        }
+    }
 }
 
 pub trait AircraftFsm {
-    fn run_fsm(&mut self, msg: FsmMessage);
+    fn run_fsm(&mut self, msg: FsmMessage, sim_time: f32);
 }
 
 #[derive(PartialEq, Debug, Clone)]
@@ -84,7 +93,7 @@ fn str_to_ship_enum(name: &str) -> AircraftId {
 
 pub struct EmptyFsm {}
 impl AircraftFsm for EmptyFsm {
-    fn run_fsm(&mut self, _: FsmMessage) {}
+    fn run_fsm(&mut self, _: FsmMessage, _: f32) {}
 }
 
 impl EmptyFsm {
@@ -189,4 +198,10 @@ pub fn is_paused(lua: &Lua) -> LuaResult<bool> {
     let dcs: LuaTable = lua.globals().get("DCS")?;
     let get_pause: LuaFunction = dcs.get("getPause")?;
     get_pause.call(())
+}
+
+pub fn get_sim_time(lua: &Lua) -> LuaResult<f32> {
+    let dcs: LuaTable = lua.globals().get("DCS")?;
+    let get_model_time: LuaFunction = dcs.get("getModelTime")?;
+    get_model_time.call(())
 }

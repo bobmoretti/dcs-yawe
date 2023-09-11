@@ -32,6 +32,7 @@ pub struct App {
     ownship_type: dcs::AircraftId,
     rx_from_dcs_gamegui: Option<Receiver<PackagedTask<Lua>>>,
     rx_from_dcs_export: Option<Receiver<PackagedTask<Lua>>>,
+    tx_time: Sender<f32>,
     paused: bool,
 }
 
@@ -43,6 +44,7 @@ impl App {
         let (tx_to_dcs_gamegui, rx_from_dcs_gamegui) = TaskSender::new();
         let (tx_to_dcs_export, rx_from_dcs_export) = TaskSender::new();
         let (tx_to_app, rx_from_gui) = channel::<AppMessage>();
+        let (tx_time, rx_time) = channel::<f32>();
 
         let gui = gui::Handle::new(
             tx_to_app.clone(),
@@ -55,7 +57,13 @@ impl App {
         let thread = std::thread::Builder::new()
             .name("yawe-app".to_string())
             .spawn(move || {
-                app_thread_entry(tx_to_dcs_gamegui, tx_to_dcs_export, handle, rx_from_gui)
+                app_thread_entry(
+                    tx_to_dcs_gamegui,
+                    tx_to_dcs_export,
+                    handle,
+                    rx_from_gui,
+                    rx_time,
+                )
             })
             .unwrap();
 
@@ -66,6 +74,7 @@ impl App {
             ownship_type: dcs::AircraftId::Unknown(String::from("")),
             rx_from_dcs_gamegui: Some(rx_from_dcs_gamegui),
             rx_from_dcs_export: Some(rx_from_dcs_export),
+            tx_time: tx_time,
             paused: false,
         };
         me
@@ -97,6 +106,12 @@ impl App {
             Ok(t) => t,
             Err(_) => dcs::AircraftId::Unknown(String::from("")),
         };
+        let Ok(sim_time) = dcs::get_sim_time(lua) else {
+            log::warn!("Failed to get DCS simulation time");
+            return -1;
+        };
+
+        let _ = self.tx_time.send(sim_time);
 
         if self.ownship_type != ownship_type {
             log::info!("Got new aircraft type {:?}", ownship_type);
@@ -174,6 +189,7 @@ fn app_thread_entry(
     sender_to_dcs_export: TaskSender<Lua>,
     gui_handle: gui::TxHandle,
     rx_from_gui: Receiver<AppMessage>,
+    time_channel: Receiver<f32>,
 ) {
     // need to dispatch between several
     let mut fsm: Box<dyn AircraftFsm> = Box::new(dcs::EmptyFsm::new(
@@ -182,6 +198,8 @@ fn app_thread_entry(
         gui_handle.clone(),
     ));
 
+    let mut sim_time = 0 as f32;
+
     loop {
         AWAKEN_APP_THREAD.wait();
 
@@ -189,6 +207,9 @@ fn app_thread_entry(
             log::info!("stopping app thread!");
             return;
         }
+
+        sim_time = time_channel.try_recv().unwrap_or(sim_time);
+
         match rx_from_gui.try_recv() {
             Ok(msg) => match msg {
                 AppMessage::AircraftChanged(aircraft) => {
@@ -199,16 +220,16 @@ fn app_thread_entry(
                         gui_handle.clone(),
                     )
                 }
-                AppMessage::FsmEvent(fsm_msg) => fsm.run_fsm(fsm_msg),
+                AppMessage::FsmEvent(fsm_msg) => fsm.run_fsm(fsm_msg, sim_time),
             },
             Err(e) => {
                 if let TryRecvError::Disconnected = e {
                     log::info!("stopping app thread via disconnected");
                     return;
                 } else {
-                    fsm.run_fsm(FsmMessage::None);
+                    fsm.run_fsm(FsmMessage::None, sim_time);
                 }
             }
-        }
+        };
     }
 }

@@ -208,7 +208,7 @@ pub struct Fsm {
 }
 
 impl dcs::AircraftFsm for Fsm {
-    fn run_fsm(&mut self, event: FsmMessage) {
+    fn run_fsm(&mut self, event: FsmMessage, _sim_time: f32) {
         match self.state {
             StartupState::ColdDark => self.cold_dark_handler(event),
             StartupState::WaitCanopyClosed => self.wait_canopy_closed(event),
