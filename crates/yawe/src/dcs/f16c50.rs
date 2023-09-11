@@ -70,6 +70,8 @@ pub enum Switch {
     HmdIntensityKnob,
     LaserArm,
     RwrPower,
+    SaiCage,
+    SaiPitchTrim,
     NumSwitches,
 }
 
@@ -113,6 +115,8 @@ const SWITCH_INFO_MAP: [Info; Switch::NumSwitches as usize] = [
     Info::Axis(Si::new(Switch::HmdIntensityKnob, 30, 3001, 392)),
     Info::Toggle(Si::new(Switch::LaserArm, 22, 3004, 103)),
     Info::Toggle(Si::new(Switch::RwrPower, 33, 3011, 401)),
+    Info::Momentary(Si::new(Switch::SaiCage, 47, 3002, 67)),
+    Info::Axis(Si::new(Switch::SaiPitchTrim, 47, 3003, 66)),
 ];
 
 #[allow(unreachable_patterns)]
@@ -453,7 +457,7 @@ impl Fsm {
         self.state = StartupState::WaitJfsSpool;
     }
 
-    fn wait_jfs_spool(&self, event: crate::app::FsmMessage) {
+    fn wait_jfs_spool(&mut self, event: crate::app::FsmMessage) {
         let Ok(lua_result) = self
             .to_gamegui
             .send(|lua| get_switch_state(lua, Switch::EngineTachometer))
@@ -468,8 +472,7 @@ impl Fsm {
         };
 
         const ENGINE_START_THRESHOLD: f32 = 0.12;
-
-        if engine_rpm_normalized < 0.12 {
+        if engine_rpm_normalized < ENGINE_START_THRESHOLD {
             return;
         }
 
@@ -478,6 +481,19 @@ impl Fsm {
             .to_gamegui
             .send(|lua| set_lockon_command(lua, LockonCommand::LeftEngineStart))
             .wait();
+
+        let _ = self
+            .to_gamegui
+            .send(|lua| {
+                let _ = set_switch_state(lua, Switch::SaiCage, -1.0);
+                let _ = set_switch_state(lua, Switch::SaiPitchTrim, 0.504);
+            })
+            .wait();
+        let _ = self
+            .to_gamegui
+            .send(|lua| set_switch_state(lua, Switch::SaiCage, 0.0));
+
+        self.state = StartupState::Done;
     }
 
     fn wait_engine_start_complete(&self, event: crate::app::FsmMessage) {}
