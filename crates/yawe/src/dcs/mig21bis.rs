@@ -169,7 +169,7 @@ pub fn set_switch(lua: &Lua, s: Switch) -> LuaResult<()> {
     }
 }
 
-pub fn unset_switch(lua: &Lua, s: Switch) -> LuaResult<()> {
+pub fn _unset_switch(lua: &Lua, s: Switch) -> LuaResult<()> {
     if is_switch_set(lua, s)? {
         toggle_switch(lua, s)
     } else {

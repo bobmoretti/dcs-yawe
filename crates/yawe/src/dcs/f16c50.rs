@@ -402,7 +402,11 @@ impl Timer {
     }
 
     pub fn is_expired(&self, now: f32) -> bool {
-        now - self.start_time >= self.expire
+        self.get_elapsed_time(now) >= self.expire
+    }
+
+    pub fn get_elapsed_time(&self, now: f32) -> f32 {
+        now - self.start_time
     }
 }
 
@@ -428,7 +432,10 @@ pub struct Fsm {
     gui: crate::gui::TxHandle,
     sim_time: f32,
     canopy_timer: Timer,
+    startup_timer: Timer,
 }
+
+const F16_STARTUP_TIME_MAX_SECONDS: f32 = 136.0;
 
 impl dcs::AircraftFsm for Fsm {
     fn run_fsm(&mut self, event: FsmMessage, sim_time: f32) {
@@ -444,6 +451,11 @@ impl dcs::AircraftFsm for Fsm {
             StartupState::WaitHudAlignMessage => self.wait_hud_align_message(event),
             StartupState::WaitNoHudAlignMessage => self.wait_no_hud_align_message(event),
             StartupState::Done => self.done(event),
+        }
+        if self.state != StartupState::ColdDark && self.state != StartupState::Done {
+            self.gui.set_startup_progress(
+                self.startup_timer.get_elapsed_time(sim_time) / F16_STARTUP_TIME_MAX_SECONDS,
+            );
         }
     }
 }
@@ -461,11 +473,13 @@ impl Fsm {
             gui,
             sim_time: 0.0,
             canopy_timer: Timer::default(),
+            startup_timer: Timer::default(),
         }
     }
     fn cold_dark_handler(&mut self, event: crate::app::FsmMessage) {
         match event {
             crate::app::FsmMessage::StartupAircraft => {
+                self.startup_timer = Timer::new(0.0, self.sim_time);
                 // this should cause the progress bar to begin animating
                 self.gui.set_startup_progress(0.001);
                 self.gui.set_startup_text("Setting up initial switches");
@@ -640,6 +654,7 @@ impl Fsm {
             let _ =
                 set_three_pos_springloaded(lua, Switch::AltimeterModeLever, ThreePosState::Stop);
         });
+        self.gui.set_startup_text("Waiting for INS alignment");
         self.state = StartupState::WaitHudAlignMessage;
     }
 
@@ -665,6 +680,13 @@ impl Fsm {
             .to_gamegui
             .send(|lua| set_switch_state(lua, Switch::InsKnob, 0.3))
             .wait();
+
+        log::info!(
+            "Finished startup in {} seconds",
+            self.startup_timer.get_elapsed_time(self.sim_time)
+        );
+        self.gui.set_startup_progress(1.0);
+        self.gui.set_startup_text("DONE");
     }
 
     fn done(&self, event: crate::app::FsmMessage) {}
