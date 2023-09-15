@@ -22,6 +22,7 @@ mlua = {version = "0.8", default-features = false, features = ["lua51", "module"
 offload = {path = "../offload"}
 rsevents = "0.3.1"
 serde = {version = "1.0.160", features = ["derive"]}
+slab_tree = "0.3.2"
 strum = {version = "0.25.0", features = ["std", "derive", "strum_macros"]}
 strum_macros = "0.25.2"
 thread-id = "4.0.0"

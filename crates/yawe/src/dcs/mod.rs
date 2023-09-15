@@ -6,6 +6,7 @@ use crate::Error;
 use mlua::prelude::{LuaFunction, LuaResult, LuaTable};
 use mlua::Lua;
 use offload::TaskSender;
+use slab_tree::{NodeId, NodeRef, Tree};
 use std::str::FromStr;
 
 pub struct SwitchInfo<SwitchT> {
@@ -151,7 +152,7 @@ pub fn get_switch_state(lua: &Lua, device_id: i32, command: i32) -> LuaResult<f3
     get_value.unwrap().call((device, command))
 }
 
-pub fn set_command(lua: &Lua, command: i32, value: f32) -> LuaResult<f32> {
+pub fn _set_command(lua: &Lua, command: i32, value: f32) -> LuaResult<f32> {
     let export: LuaTable = lua.globals().get("Export")?;
     let set_command: LuaResult<LuaFunction> = export.get("LoGetCommand");
     if let Err(e) = set_command {
@@ -223,4 +224,180 @@ pub fn set_lockon_command(lua: &Lua, command: LockonCommand) -> LuaResult<()> {
 pub fn list_indication(lua: &Lua, device: i32) -> LuaResult<String> {
     let list_indication: LuaFunction = lua.globals().get("list_indication")?;
     list_indication.call(device)
+}
+#[derive(Debug, Clone, PartialEq)]
+struct IndicationNode {
+    field: String,
+    value: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct IndicationSegment {
+    pub indication: IndicationNode,
+    depth_change: i32,
+}
+
+fn parse_indication_segment(segment: &str) -> Option<IndicationSegment> {
+    let lines: Vec<&str> = segment.trim_start().split("\n").collect();
+    if lines.len() < 2 {
+        log::warn!(
+            "Mal-formed parse in list indication {:?}, {:?}\n",
+            segment,
+            lines
+        );
+        return None;
+    }
+
+    let mut depth_change: i32 = 0;
+
+    let field = lines[0];
+    let value = lines[1];
+
+    for line in &lines[2..] {
+        if line.starts_with("children are {") {
+            depth_change += 1;
+            continue;
+        }
+        depth_change -= line.matches("}").count() as i32;
+    }
+
+    Some(IndicationSegment {
+        indication: IndicationNode {
+            field: field.to_string(),
+            value: value.to_string(),
+        },
+        depth_change,
+    })
+}
+
+fn parse_indication(s: &str) -> Tree<IndicationNode> {
+    let mut tree = Tree::<IndicationNode>::new();
+    let segments: Vec<&str> = s
+        .split("-----------------------------------------")
+        .collect();
+
+    log::debug!("Parsing indication, {} segments", segments.len());
+
+    let mut curr = tree.set_root(parse_indication_segment(segments[1]).unwrap().indication);
+
+    // since the string starts with a separator, `split()` will return an empty
+    // string as the first element; we just discard it.
+    for segment in &segments[1..] {
+        let Some(parsed) = parse_indication_segment(segment) else {
+            continue;
+        };
+        let depth_change = parsed.depth_change;
+
+        let mut node = tree.get_mut(curr).unwrap();
+        let new_id = node.append(parsed.indication);
+
+        if depth_change > 0 {
+            curr = new_id.node_id();
+            continue;
+        }
+
+        // depth_change is negative
+        for _ in 0..-depth_change {
+            curr = tree.get(curr).unwrap().parent().unwrap().node_id();
+        }
+    }
+    tree
+}
+
+fn _traverse_tree(t: &Tree<IndicationNode>) {
+    _traverse_node(t.root().unwrap(), 0);
+}
+
+fn _traverse_node(n: NodeRef<IndicationNode>, depth: i32) {
+    for _ in 0..depth {
+        print!("    ");
+    }
+    let data = n.data();
+    print!("{data:?}\n");
+    for child in n.children() {
+        _traverse_node(child, depth + 1);
+    }
+}
+
+fn lookup_tree<'a>(tree: &'a Tree<IndicationNode>, path: &Vec<&str>) -> Option<&'a IndicationNode> {
+    let get_child = |node_id: NodeId, key: &str| -> Option<NodeId> {
+        let node = tree.get(node_id).unwrap();
+        for child in node.children() {
+            if child.data().field == key {
+                return Some(child.node_id());
+            }
+        }
+        None
+    };
+
+    if tree.root().unwrap().data().field != path[0] {
+        return None;
+    }
+
+    let mut cur = tree.root_id().unwrap();
+
+    for item in &path[1..] {
+        let Some(id) = get_child(cur, item) else {
+            return None;
+        };
+        cur = id;
+    }
+    Some(tree.get(cur).unwrap().data())
+}
+
+pub fn get_avionics_value(
+    to_export: &TaskSender<Lua>,
+    device: i32,
+    path: &Vec<&str>,
+) -> Option<String> {
+    let Ok(lua_result) = to_export
+        .send(move |lua| list_indication(lua, device))
+        .wait()
+    else {
+        return None;
+    };
+    let Ok(s) = lua_result else {
+        return None;
+    };
+
+    if s.trim().is_empty() {
+        return None;
+    }
+
+    let tree = parse_indication(&s);
+    match lookup_tree(&tree, path) {
+        None => None,
+        Some(node) => Some(node.value.clone()),
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use crate::dcs::_traverse_tree;
+    use crate::dcs::lookup_tree;
+    use crate::dcs::parse_indication;
+
+    #[test]
+    fn test_parse_indication() {
+        use std::path::PathBuf;
+        let mut d = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        d.push("resources/f16_hud_align.txt");
+        let Ok(s) = std::fs::read_to_string(d) else {
+            panic!("Can't find test");
+        };
+        let tree = parse_indication(&s);
+        _traverse_tree(&tree);
+        let s = lookup_tree(
+            &tree,
+            &vec![
+                "HUD_glass",
+                "HUD_BlankRoot_PH_com",
+                "HUD_Indication_bias",
+                "HUD_Mach_num_origin",
+                "HUD_Window4_MachNumber_dot",
+            ],
+        );
+        assert!(s.is_some());
+        assert!(s.unwrap().value == ".");
+    }
 }

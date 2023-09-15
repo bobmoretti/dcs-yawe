@@ -20,12 +20,14 @@ enum Info {
     Axis(SwitchInfo<Switch>),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
 enum ThreePosState {
     Down,
     Stop,
     Up,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
 enum ThreePosToggleState {
     Down,
     Middle,
@@ -85,6 +87,7 @@ pub enum Switch {
     AntiSkid,
     EjectionSafety,
     AltimeterModeLever,
+    InsKnob,
     NumSwitches,
 }
 
@@ -141,9 +144,9 @@ const SWITCH_INFO_MAP: [Info; Switch::NumSwitches as usize] = [
         info: Si::new(Switch::AltimeterModeLever, 45, 3002, 60),
         command_up: 3001,
     }),
+    Info::MultiToggle(Si::new(Switch::InsKnob, 14, 3001, 719)),
 ];
 
-#[allow(unreachable_patterns)]
 fn get_switch_info(s: Switch) -> Option<&'static Si> {
     let info = &SWITCH_INFO_MAP[s as usize];
     match info {
@@ -154,6 +157,19 @@ fn get_switch_info(s: Switch) -> Option<&'static Si> {
         Info::SpringLoaded3Pos(i) => Some(&i.info),
         Info::Axis(i) => Some(i),
         Info::DualCommand3Pos(_) => None,
+    }
+}
+
+fn get_switch_argument(s: Switch) -> i32 {
+    let info = &SWITCH_INFO_MAP[s as usize];
+    match info {
+        Info::Toggle(i) => i.argument,
+        Info::MultiToggle(i) => i.argument,
+        Info::Momentary(i) => i.argument,
+        Info::SpringLoaded3Pos(i) => i.info.argument,
+        Info::DualCommand3Pos(i) => i.argument,
+        Info::FloatValue(i) => i.argument,
+        Info::Axis(i) => i.argument,
     }
 }
 
@@ -178,12 +194,7 @@ pub fn set_switch_state(lua: &Lua, s: Switch, state: f32) -> LuaResult<()> {
 }
 
 pub fn get_switch_state(lua: &Lua, s: Switch) -> LuaResult<f32> {
-    if let Some(info) = get_switch_info(s) {
-        dcs::get_switch_state(lua, 0, info.argument)
-    } else {
-        log::warn!("Tried to get the state of {:?} which is not possible", s);
-        LuaResult::Ok(0.0)
-    }
+    dcs::get_switch_state(lua, 0, get_switch_argument(s))
 }
 
 pub fn is_switch_set(lua: &Lua, s: Switch) -> LuaResult<bool> {
@@ -229,7 +240,11 @@ fn set_three_pos_springloaded(lua: &Lua, s: Switch, state: ThreePosState) -> Lua
     Ok(())
 }
 
-fn set_three_pos(lua: &Lua, s: Switch, state: ThreePosToggleState) -> LuaResult<()> {
+fn set_three_pos(
+    to_gamegui: &TaskSender<Lua>,
+    s: Switch,
+    state: ThreePosToggleState,
+) -> LuaResult<()> {
     let Info::DualCommand3Pos(info) = &SWITCH_INFO_MAP[s as usize] else {
         log::warn!(
             "Tried to interpret {:?} as a three pos springloaded switch, but it is not",
@@ -238,17 +253,34 @@ fn set_three_pos(lua: &Lua, s: Switch, state: ThreePosToggleState) -> LuaResult<
         return LuaResult::Ok(());
     };
 
-    match state {
-        ThreePosToggleState::Down => perform_click(lua, info.device_id, info.command_down, -1.0),
-        ThreePosToggleState::Middle => {
-            perform_click(lua, info.device_id, info.command_down, 0.0)?;
-            perform_click(lua, info.device_id, info.command_up, -1.0)
-        }
-        ThreePosToggleState::Up => {
-            perform_click(lua, info.device_id, info.command_down, 1.0)?;
-            perform_click(lua, info.device_id, info.command_up, 0.0)
-        }
-    }
+    let Ok(lua_result) = to_gamegui
+        .send(move |lua| match state {
+            ThreePosToggleState::Down => {
+                perform_click(lua, info.device_id, info.command_down, -1.0)
+            }
+            ThreePosToggleState::Middle => {
+                perform_click(lua, info.device_id, info.command_down, 0.0)?;
+                perform_click(lua, info.device_id, info.command_up, -1.0)
+            }
+            ThreePosToggleState::Up => perform_click(lua, info.device_id, info.command_up, 1.0),
+        })
+        .wait()
+    else {
+        return Ok(());
+    };
+
+    // If we don't add this hack, the Jet won't allow the switch to properly spring
+    // back to center
+    std::thread::sleep(std::time::Duration::from_millis(100));
+
+    if state == ThreePosToggleState::Up {
+        let _ = to_gamegui
+            .send(|lua| perform_click(lua, info.device_id, info.command_up, 0.0))
+            .wait()
+            .unwrap_or(Ok(()));
+    };
+
+    Ok(())
 }
 
 fn poll_argument(to_gamegui: &TaskSender<Lua>, switch: Switch) -> Result<f32, crate::Error> {
@@ -274,11 +306,43 @@ fn handle_polling_err(r: &Result<f32, crate::Error>) {
 }
 
 enum IndicationDevice {
-    Ufc = 6,
+    Hud = 1,
+    LeftMfd = 4,
+    RightMfd = 5,
+    Ded = 6,
+    UhfRadioPreset = 10,
+    UhfRadioFreq = 11,
+    Ehsi = 13,
+    CmdsQuantity = 16,
+    Rwr = 17,
+    Hmcs = 18,
 }
 
 fn get_avionics_indication(lua: &Lua, device: IndicationDevice) -> LuaResult<String> {
     list_indication(lua, device as i32)
+}
+
+fn get_avionics_value(
+    to_export: &TaskSender<Lua>,
+    device: IndicationDevice,
+    path: &Vec<&str>,
+) -> Option<String> {
+    super::get_avionics_value(&to_export, device as i32, path)
+}
+
+fn get_hud_align_value(to_export: &TaskSender<Lua>) -> Option<String> {
+    get_avionics_value(
+        &to_export,
+        IndicationDevice::Hud,
+        &vec![
+            "HUD_glass",
+            "HUD_BlankRoot_PH_com",
+            "HUD_Indication_bias",
+            "HUD_Window7_origin",
+            "HUD_AlignStatus_origin",
+            "HUD_Window7_AlignmentStatus",
+        ],
+    )
 }
 
 fn throw_initial_switches(tx: &TaskSender<Lua>) {
@@ -313,11 +377,11 @@ fn throw_initial_switches(tx: &TaskSender<Lua>) {
                 (Switch::LaserArm, 1.0),
                 (Switch::RwrPower, 1.0),
                 (Switch::EjectionSafety, 1.0),
+                (Switch::InsKnob, 0.1),
             ];
             for (switch, state) in switch_states {
                 let _ = set_switch_state(lua, switch, state);
             }
-            let _ = set_three_pos(lua, Switch::AntiSkid, ThreePosToggleState::Middle);
         })
         .wait()
         .map_err(|_| crate::Error::CommError);
@@ -351,7 +415,8 @@ enum StartupState {
     WaitCanopyLocked,
     WaitJfsSpool,
     WaitGeneratorsRunning,
-    WaitInsAligned,
+    WaitHudAlignMessage,
+    WaitNoHudAlignMessage,
     Done,
 }
 
@@ -376,8 +441,9 @@ impl dcs::AircraftFsm for Fsm {
             StartupState::WaitCanopyLocked => self.wait_canopy_locked(event),
             StartupState::WaitJfsSpool => self.wait_jfs_spool(event),
             StartupState::WaitGeneratorsRunning => self.wait_generators_running(event),
+            StartupState::WaitHudAlignMessage => self.wait_hud_align_message(event),
+            StartupState::WaitNoHudAlignMessage => self.wait_no_hud_align_message(event),
             StartupState::Done => self.done(event),
-            StartupState::WaitInsAligned => todo!(),
         }
     }
 }
@@ -556,7 +622,7 @@ impl Fsm {
     fn wait_generators_running(&mut self, event: crate::app::FsmMessage) {
         let Ok(lua_result) = self
             .to_export
-            .send(|lua| get_avionics_indication(lua, IndicationDevice::Ufc))
+            .send(|lua| get_avionics_indication(lua, IndicationDevice::Ded))
             .wait()
         else {
             return;
@@ -569,11 +635,37 @@ impl Fsm {
             return;
         }
 
+        let _ = set_three_pos(&self.to_gamegui, Switch::AntiSkid, ThreePosToggleState::Up);
         self.to_gamegui.send(|lua| {
             let _ =
                 set_three_pos_springloaded(lua, Switch::AltimeterModeLever, ThreePosState::Stop);
         });
-        self.state = StartupState::Done;
+        self.state = StartupState::WaitHudAlignMessage;
     }
+
+    fn wait_hud_align_message(&mut self, event: crate::app::FsmMessage) {
+        let val = get_hud_align_value(&self.to_export);
+        let Some(txt) = val else {
+            return;
+        };
+        log::info!("Got text {txt}");
+        if txt != "ALIGN" {
+            return;
+        }
+        self.state = StartupState::WaitNoHudAlignMessage;
+    }
+
+    fn wait_no_hud_align_message(&mut self, event: crate::app::FsmMessage) {
+        let val = get_hud_align_value(&self.to_export);
+        let None = val else {
+            return;
+        };
+        self.state = StartupState::Done;
+        let _ = self
+            .to_gamegui
+            .send(|lua| set_switch_state(lua, Switch::InsKnob, 0.3))
+            .wait();
+    }
+
     fn done(&self, event: crate::app::FsmMessage) {}
 }

@@ -39,7 +39,7 @@ fn setup_logging(config: &config::Config, mut console: File) -> Result<(), fern:
 
     use log::LevelFilter;
     let level = if config.debug {
-        LevelFilter::Debug
+        LevelFilter::Info
     } else {
         LevelFilter::Info
     };
