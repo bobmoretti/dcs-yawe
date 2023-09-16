@@ -88,6 +88,27 @@ pub enum Switch {
     EjectionSafety,
     AltimeterModeLever,
     InsKnob,
+    Icp1,
+    Icp2,
+    Icp3,
+    Icp4,
+    Icp5,
+    Icp6,
+    Icp7,
+    Icp8,
+    Icp9,
+    Icp0,
+    IcpCom1,
+    IcpCom2,
+    IcpIff,
+    IcpList,
+    IcpAaMode,
+    IcpAgMode,
+    IcpRcl,
+    IcpEnter,
+    IcpDedInc,
+    IcpDataRtnSeq,
+    IcpDataUpDown,
     NumSwitches,
 }
 
@@ -145,6 +166,36 @@ const SWITCH_INFO_MAP: [Info; Switch::NumSwitches as usize] = [
         command_up: 3001,
     }),
     Info::MultiToggle(Si::new(Switch::InsKnob, 14, 3001, 719)),
+    Info::Momentary(Si::new(Switch::Icp1, 17, 3003, 171)),
+    Info::Momentary(Si::new(Switch::Icp2, 17, 3004, 172)),
+    Info::Momentary(Si::new(Switch::Icp3, 17, 3005, 173)),
+    Info::Momentary(Si::new(Switch::Icp4, 17, 3006, 175)),
+    Info::Momentary(Si::new(Switch::Icp5, 17, 3007, 176)),
+    Info::Momentary(Si::new(Switch::Icp6, 17, 3008, 177)),
+    Info::Momentary(Si::new(Switch::Icp7, 17, 3009, 179)),
+    Info::Momentary(Si::new(Switch::Icp8, 17, 3010, 180)),
+    Info::Momentary(Si::new(Switch::Icp9, 17, 3011, 181)),
+    Info::Momentary(Si::new(Switch::Icp0, 17, 3002, 182)),
+    Info::Momentary(Si::new(Switch::IcpCom1, 17, 3012, 165)),
+    Info::Momentary(Si::new(Switch::IcpCom2, 17, 3013, 166)),
+    Info::Momentary(Si::new(Switch::IcpIff, 17, 3014, 167)),
+    Info::Momentary(Si::new(Switch::IcpList, 17, 3015, 168)),
+    Info::Momentary(Si::new(Switch::IcpAaMode, 17, 3018, 169)),
+    Info::Momentary(Si::new(Switch::IcpAgMode, 17, 3019, 170)),
+    Info::Momentary(Si::new(Switch::IcpRcl, 17, 3017, 174)),
+    Info::Momentary(Si::new(Switch::IcpEnter, 17, 3016, 178)),
+    Info::SpringLoaded3Pos(SpringLoaded3PosInfo {
+        info: Si::new(Switch::IcpDedInc, 17, 3031, 183),
+        command_up: 3030,
+    }),
+    Info::SpringLoaded3Pos(SpringLoaded3PosInfo {
+        info: Si::new(Switch::IcpDataRtnSeq, 17, 3032, 184),
+        command_up: 3033,
+    }),
+    Info::SpringLoaded3Pos(SpringLoaded3PosInfo {
+        info: Si::new(Switch::IcpDataUpDown, 17, 3035, 185),
+        command_up: 3034,
+    }),
 ];
 
 fn get_switch_info(s: Switch) -> Option<&'static Si> {
@@ -195,6 +246,51 @@ pub fn set_switch_state(lua: &Lua, s: Switch, state: f32) -> LuaResult<()> {
 
 pub fn get_switch_state(lua: &Lua, s: Switch) -> LuaResult<f32> {
     dcs::get_switch_state(lua, 0, get_switch_argument(s))
+}
+
+fn wait_switch_state(to_gamegui: &TaskSender<Lua>, s: Switch, value: f32) {
+    loop {
+        let Ok(lua_result) = to_gamegui.send(move |lua| get_switch_state(lua, s)).wait() else {
+            return;
+        };
+
+        let Ok(switch_state) = lua_result else {
+            log::warn!("Polling {s:?} position failed!");
+            return;
+        };
+
+        if switch_state == value {
+            return;
+        }
+    }
+}
+
+fn set_switch_and_wait(to_gamegui: &TaskSender<Lua>, s: Switch, value: f32) {
+    let _ = to_gamegui
+        .send(move |lua| set_switch_state(lua, s, value))
+        .wait();
+    wait_switch_state(to_gamegui, s, value)
+}
+
+fn actuate_monentary(to_gamegui: &TaskSender<Lua>, s: Switch, value: f32) {
+    set_switch_and_wait(to_gamegui, s, value);
+    set_switch_and_wait(to_gamegui, s, 0.0);
+}
+
+fn ded_return(to_gamegui: &TaskSender<Lua>) {
+    actuate_monentary(to_gamegui, Switch::IcpDataRtnSeq, -1.0);
+}
+
+fn ded_sequence(to_gamegui: &TaskSender<Lua>) {
+    actuate_monentary(to_gamegui, Switch::IcpDataRtnSeq, 1.0);
+}
+
+fn ded_down(to_gamegui: &TaskSender<Lua>) {
+    actuate_monentary(to_gamegui, Switch::IcpDataUpDown, -1.0);
+}
+
+fn ded_up(to_gamegui: &TaskSender<Lua>) {
+    actuate_monentary(to_gamegui, Switch::IcpDataUpDown, 1.0);
 }
 
 pub fn is_switch_set(lua: &Lua, s: Switch) -> LuaResult<bool> {
@@ -686,6 +782,7 @@ impl Fsm {
             self.startup_timer.get_elapsed_time(self.sim_time)
         );
         self.gui.set_startup_progress(1.0);
+        ded_return(&self.to_gamegui);
         self.gui.set_startup_text("DONE");
     }
 
