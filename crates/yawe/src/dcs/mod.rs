@@ -278,7 +278,10 @@ fn parse_indication(s: &str) -> Tree<IndicationNode> {
 
     log::debug!("Parsing indication, {} segments", segments.len());
 
-    let mut curr = tree.set_root(parse_indication_segment(segments[1]).unwrap().indication);
+    let mut curr = tree.set_root(IndicationNode {
+        field: "root".to_string(),
+        value: String::new(),
+    });
 
     // since the string starts with a separator, `split()` will return an empty
     // string as the first element; we just discard it.
@@ -330,13 +333,16 @@ fn lookup_tree<'a>(tree: &'a Tree<IndicationNode>, path: &Vec<&str>) -> Option<&
         None
     };
 
-    if tree.root().unwrap().data().field != path[0] {
+    // Since there could be multiple top level indications, and a tree can only have
+    // a single root, we just make an empty one called "root" to support more than
+    // one top level element as children of the root.
+    if tree.root().unwrap().data().field != "root" {
         return None;
     }
 
     let mut cur = tree.root_id().unwrap();
 
-    for item in &path[1..] {
+    for item in path {
         let Some(id) = get_child(cur, item) else {
             return None;
         };
@@ -390,7 +396,6 @@ mod test {
         let s = lookup_tree(
             &tree,
             &vec![
-                "HUD_glass",
                 "HUD_BlankRoot_PH_com",
                 "HUD_Indication_bias",
                 "HUD_Mach_num_origin",

@@ -431,7 +431,6 @@ fn get_hud_align_value(to_export: &TaskSender<Lua>) -> Option<String> {
         &to_export,
         IndicationDevice::Hud,
         &vec![
-            "HUD_glass",
             "HUD_BlankRoot_PH_com",
             "HUD_Indication_bias",
             "HUD_Window7_origin",
@@ -439,6 +438,10 @@ fn get_hud_align_value(to_export: &TaskSender<Lua>) -> Option<String> {
             "HUD_Window7_AlignmentStatus",
         ],
     )
+}
+
+fn is_on_cni(to_export: &TaskSender<Lua>) -> bool {
+    get_avionics_value(to_export, IndicationDevice::Ded, &vec!["DED CNI TACAN PH"]).is_some()
 }
 
 fn throw_initial_switches(tx: &TaskSender<Lua>) {
@@ -783,6 +786,10 @@ impl Fsm {
         );
         self.gui.set_startup_progress(1.0);
         ded_return(&self.to_gamegui);
+        if !is_on_cni(&self.to_export) {
+            log::warn!("Not on CNI page after dobbering left!");
+        }
+
         self.gui.set_startup_text("DONE");
     }
 
