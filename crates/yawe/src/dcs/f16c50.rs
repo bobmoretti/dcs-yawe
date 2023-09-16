@@ -272,25 +272,25 @@ fn set_switch_and_wait(to_gamegui: &TaskSender<Lua>, s: Switch, value: f32) {
     wait_switch_state(to_gamegui, s, value)
 }
 
-fn actuate_monentary(to_gamegui: &TaskSender<Lua>, s: Switch, value: f32) {
+fn actuate_momentary(to_gamegui: &TaskSender<Lua>, s: Switch, value: f32) {
     set_switch_and_wait(to_gamegui, s, value);
     set_switch_and_wait(to_gamegui, s, 0.0);
 }
 
 fn ded_return(to_gamegui: &TaskSender<Lua>) {
-    actuate_monentary(to_gamegui, Switch::IcpDataRtnSeq, -1.0);
+    actuate_momentary(to_gamegui, Switch::IcpDataRtnSeq, -1.0);
 }
 
 fn ded_sequence(to_gamegui: &TaskSender<Lua>) {
-    actuate_monentary(to_gamegui, Switch::IcpDataRtnSeq, 1.0);
+    actuate_momentary(to_gamegui, Switch::IcpDataRtnSeq, 1.0);
 }
 
 fn ded_down(to_gamegui: &TaskSender<Lua>) {
-    actuate_monentary(to_gamegui, Switch::IcpDataUpDown, -1.0);
+    actuate_momentary(to_gamegui, Switch::IcpDataUpDown, -1.0);
 }
 
 fn ded_up(to_gamegui: &TaskSender<Lua>) {
-    actuate_monentary(to_gamegui, Switch::IcpDataUpDown, 1.0);
+    actuate_momentary(to_gamegui, Switch::IcpDataUpDown, 1.0);
 }
 
 pub fn is_switch_set(lua: &Lua, s: Switch) -> LuaResult<bool> {
