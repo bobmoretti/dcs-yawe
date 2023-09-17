@@ -2,12 +2,13 @@
 #![allow(unused_variables)]
 use crate::app::FsmMessage;
 use crate::dcs::{self, list_indication, set_lockon_command, LockonCommand, SwitchInfo};
+use egui_backend::egui;
 use mlua::prelude::LuaResult;
 use mlua::Lua;
 use offload::TaskSender;
 use strum::IntoStaticStr;
 
-use super::perform_click;
+use super::{lookup_tree, perform_click, IndicationNode};
 
 type Si = SwitchInfo<Switch>;
 enum Info {
@@ -293,6 +294,27 @@ fn ded_up(to_gamegui: &TaskSender<Lua>) {
     actuate_momentary(to_gamegui, Switch::IcpDataUpDown, 1.0);
 }
 
+fn icp_list(to_gamegui: &TaskSender<Lua>) {
+    actuate_momentary(to_gamegui, Switch::IcpList, 1.0);
+}
+
+fn icp_number(to_gamegui: &TaskSender<Lua>, number: i32) {
+    let switch = match number {
+        0 => Switch::Icp0,
+        1 => Switch::Icp1,
+        2 => Switch::Icp2,
+        3 => Switch::Icp3,
+        4 => Switch::Icp4,
+        5 => Switch::Icp5,
+        6 => Switch::Icp6,
+        7 => Switch::Icp7,
+        8 => Switch::Icp8,
+        9 => Switch::Icp9,
+        _ => return,
+    };
+    actuate_momentary(to_gamegui, switch, 1.0);
+}
+
 pub fn is_switch_set(lua: &Lua, s: Switch) -> LuaResult<bool> {
     Ok(get_switch_state(lua, s)? > 0.5)
 }
@@ -401,6 +423,102 @@ fn handle_polling_err(r: &Result<f32, crate::Error>) {
     }
 }
 
+#[derive(Default, Debug, PartialEq, Clone)]
+struct CmdsBingo {
+    chaff: i8,
+    flare: i8,
+    feedback: bool,
+    reqctr: bool,
+    bingo: bool,
+}
+
+#[derive(Default, Debug, PartialEq, Clone)]
+struct CmdsProgramSlot {
+    burst_quantity: i8,
+    burst_interval: f32,
+    sequence_quantity: i8,
+    sequence_interval: f32,
+}
+
+#[derive(Default, Debug, PartialEq, Clone)]
+struct CmdsProgram {
+    chaff: CmdsProgramSlot,
+    flare: CmdsProgramSlot,
+}
+
+#[derive(Default, Debug, PartialEq, Clone)]
+struct Cmds {
+    bingo: CmdsBingo,
+    programs: [CmdsProgram; 6],
+}
+
+#[derive(Default, Debug, PartialEq, Clone)]
+struct AvionicsState {
+    cmds: Cmds,
+}
+
+fn parse_quantity<T>(tree: &slab_tree::Tree<IndicationNode>, path: &Vec<&str>) -> Option<T>
+where
+    T: std::str::FromStr,
+{
+    lookup_tree(tree, path)?.value.parse::<T>().ok()
+}
+
+fn parse_bool(tree: &slab_tree::Tree<IndicationNode>, path: &Vec<&str>) -> Option<bool> {
+    match lookup_tree(tree, path)?.value.as_str() {
+        "ON" => Some(true),
+        "OFF" => Some(false),
+        _ => None,
+    }
+}
+
+fn read_cmds_bingo_page(to_export: &TaskSender<Lua>) -> Option<CmdsBingo> {
+    let ded_indication = super::get_avionics_indication(to_export, IndicationDevice::Ded as i32)?;
+
+    let chaff_count: i8 = parse_quantity(
+        &ded_indication,
+        &vec!["CMDS_CH_Scratchpad_placeholder", "CMDS_CH_Scratchpad"],
+    )?;
+
+    let flare_count: i8 = parse_quantity(
+        &ded_indication,
+        &vec!["CMDS_FL_Scratchpad_placeholder", "CMDS_FL_Scratchpad"],
+    )?;
+
+    Some(CmdsBingo {
+        chaff: chaff_count,
+        flare: flare_count,
+        feedback: parse_bool(
+            &ded_indication,
+            &vec!["CMDS_FDBK_value_placeholder", "CMDS_FDBK_value"],
+        )?,
+        reqctr: parse_bool(
+            &ded_indication,
+            &vec!["CMDS_REQCTR_value_placeholder", "CMDS_REQCTR_value"],
+        )?,
+        bingo: parse_bool(
+            &ded_indication,
+            &vec!["CMDS_BINGO_value_placeholder", "CMDS_BINGO_value"],
+        )?,
+    })
+}
+
+fn read_cmds(to_export: &TaskSender<Lua>, to_gamegui: &TaskSender<Lua>) -> Option<AvionicsState> {
+    while !is_on_cni(to_export) {
+        ded_return(to_gamegui);
+    }
+    icp_list(to_gamegui);
+    while !is_on_list(to_export) {}
+    icp_number(to_gamegui, 7);
+    while !is_on_cmds_bingo(to_export) {}
+    Some(AvionicsState {
+        cmds: Cmds {
+            bingo: read_cmds_bingo_page(to_export)?,
+            programs: Default::default(),
+        },
+    })
+}
+
 enum IndicationDevice {
     Hud = 1,
     LeftMfd = 4,
@@ -442,6 +560,14 @@ fn get_hud_align_value(to_export: &TaskSender<Lua>) -> Option<String> {
 
 fn is_on_cni(to_export: &TaskSender<Lua>) -> bool {
     get_avionics_value(to_export, IndicationDevice::Ded, &vec!["DED CNI TACAN PH"]).is_some()
+}
+
+fn is_on_list(to_export: &TaskSender<Lua>) -> bool {
+    get_avionics_value(to_export, IndicationDevice::Ded, &vec!["LIST Label"]).is_some()
+}
+
+fn is_on_cmds_bingo(to_export: &TaskSender<Lua>) -> bool {
+    get_avionics_value(to_export, IndicationDevice::Ded, &vec!["CMDS_BINGO_label"]).is_some()
 }
 
 fn throw_initial_switches(tx: &TaskSender<Lua>) {
@@ -532,6 +658,7 @@ pub struct Fsm {
     sim_time: f32,
     canopy_timer: Timer,
     startup_timer: Timer,
+    avionics: AvionicsState,
 }
 
 const F16_STARTUP_TIME_MAX_SECONDS: f32 = 136.0;
@@ -573,6 +700,7 @@ impl Fsm {
             sim_time: 0.0,
             canopy_timer: Timer::default(),
             startup_timer: Timer::default(),
+            avionics: AvionicsState::default(),
         }
     }
     fn cold_dark_handler(&mut self, event: crate::app::FsmMessage) {
@@ -794,4 +922,11 @@ impl Fsm {
     }
 
     fn done(&self, event: crate::app::FsmMessage) {}
+}
+
+pub fn make_widget(ui: &mut egui::Ui, to_gamegui: &TaskSender<Lua>, to_export: &TaskSender<Lua>) {
+    if ui.button("Get avionics state").clicked() {
+        let result = read_cmds(to_export, to_gamegui);
+        log::info!("{result:?}");
+    }
 }

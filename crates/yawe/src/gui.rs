@@ -21,7 +21,7 @@ struct Gui {
     rx: Receiver<Message>,
     tx: Sender<app::AppMessage>,
     to_dcs_gamegui: TaskSender<Lua>,
-    _to_dcs_export: TaskSender<Lua>,
+    to_dcs_export: TaskSender<Lua>,
     aircraft_type: dcs::AircraftId,
     startup_progress: f32,
     pub egui_context: egui::Context,
@@ -163,7 +163,7 @@ impl Gui {
             rx: rx,
             tx: tx,
             to_dcs_gamegui,
-            _to_dcs_export: to_dcs_export,
+            to_dcs_export,
             aircraft_type: dcs::AircraftId::Unknown("".to_string()),
             startup_progress: 0.0,
             glfw_backend: glfw_backend,
@@ -183,6 +183,19 @@ impl Gui {
 
     fn close(&mut self) {
         self.glfw_backend.window.set_should_close(true);
+    }
+
+    fn make_aircraft_specific_widget(&mut self, ui: &mut egui::Ui) {
+        ui.label("Aircraft options");
+        match self.aircraft_type {
+            dcs::AircraftId::MiG_21Bis => {
+                dcs::mig21bis::make_debug_widget(ui, &mut self.switch_vals, &self.to_dcs_gamegui)
+            }
+            dcs::AircraftId::F_16C_50 => {
+                dcs::f16c50::make_widget(ui, &self.to_dcs_gamegui, &self.to_dcs_export)
+            }
+            _ => (),
+        };
     }
 
     fn make_debug_widget(&mut self, ui: &mut egui::Ui) {
@@ -274,6 +287,9 @@ impl UserApp for Gui {
                 ui.checkbox(&mut self.debug_widget_visible, "Debug panel");
                 ui.checkbox(&mut self.is_on_top, "Always on top");
             });
+
+            ui.separator();
+            self.make_aircraft_specific_widget(ui);
 
             if self.debug_widget_visible {
                 ui.separator();

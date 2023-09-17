@@ -226,7 +226,7 @@ pub fn list_indication(lua: &Lua, device: i32) -> LuaResult<String> {
     list_indication.call(device)
 }
 #[derive(Debug, Clone, PartialEq)]
-struct IndicationNode {
+pub struct IndicationNode {
     field: String,
     value: String,
 }
@@ -322,7 +322,10 @@ fn _traverse_node(n: NodeRef<IndicationNode>, depth: i32) {
     }
 }
 
-fn lookup_tree<'a>(tree: &'a Tree<IndicationNode>, path: &Vec<&str>) -> Option<&'a IndicationNode> {
+pub fn lookup_tree<'a>(
+    tree: &'a Tree<IndicationNode>,
+    path: &Vec<&str>,
+) -> Option<&'a IndicationNode> {
     let get_child = |node_id: NodeId, key: &str| -> Option<NodeId> {
         let node = tree.get(node_id).unwrap();
         for child in node.children() {
@@ -351,11 +354,10 @@ fn lookup_tree<'a>(tree: &'a Tree<IndicationNode>, path: &Vec<&str>) -> Option<&
     Some(tree.get(cur).unwrap().data())
 }
 
-pub fn get_avionics_value(
+pub fn get_avionics_indication(
     to_export: &TaskSender<Lua>,
     device: i32,
-    path: &Vec<&str>,
-) -> Option<String> {
+) -> Option<Tree<IndicationNode>> {
     let Ok(lua_result) = to_export
         .send(move |lua| list_indication(lua, device))
         .wait()
@@ -369,8 +371,15 @@ pub fn get_avionics_value(
     if s.trim().is_empty() {
         return None;
     }
+    Some(parse_indication(&s))
+}
 
-    let tree = parse_indication(&s);
+pub fn get_avionics_value(
+    to_export: &TaskSender<Lua>,
+    device: i32,
+    path: &Vec<&str>,
+) -> Option<String> {
+    let tree = get_avionics_indication(to_export, device)?;
     match lookup_tree(&tree, path) {
         None => None,
         Some(node) => Some(node.value.clone()),
