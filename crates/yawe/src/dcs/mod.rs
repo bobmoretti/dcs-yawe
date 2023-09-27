@@ -307,16 +307,18 @@ fn parse_indication(s: &str) -> Tree<IndicationNode> {
     tree
 }
 
-fn _traverse_tree(t: &Tree<IndicationNode>) {
+pub fn _traverse_tree(t: &Tree<IndicationNode>) {
     _traverse_node(t.root().unwrap(), 0);
 }
 
 fn _traverse_node(n: NodeRef<IndicationNode>, depth: i32) {
+    let mut s = String::default();
     for _ in 0..depth {
-        print!("    ");
+        s += &("    ");
     }
+
     let data = n.data();
-    print!("{data:?}\n");
+    log::info!("{s}{data:?}\n");
     for child in n.children() {
         _traverse_node(child, depth + 1);
     }

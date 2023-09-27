@@ -246,7 +246,8 @@ pub fn set_switch_state(lua: &Lua, s: Switch, state: f32) -> LuaResult<()> {
 }
 
 pub fn get_switch_state(lua: &Lua, s: Switch) -> LuaResult<f32> {
-    dcs::get_switch_state(lua, 0, get_switch_argument(s))
+    let argument = get_switch_argument(s);
+    dcs::get_switch_state(lua, 0, argument)
 }
 
 fn wait_switch_state(to_gamegui: &TaskSender<Lua>, s: Switch, value: f32) {
@@ -278,12 +279,35 @@ fn actuate_momentary(to_gamegui: &TaskSender<Lua>, s: Switch, value: f32) {
     set_switch_and_wait(to_gamegui, s, 0.0);
 }
 
+fn actuate_3pos_spring(to_gamegui: &TaskSender<Lua>, s: Switch, state: ThreePosState) {
+    let _ = to_gamegui
+        .send(move |lua| set_three_pos_springloaded(lua, s, state))
+        .wait();
+    wait_switch_state(
+        to_gamegui,
+        s,
+        match state {
+            ThreePosState::Down => -1.0,
+            ThreePosState::Stop => 0.0,
+            ThreePosState::Up => 1.0,
+        },
+    );
+    wait_frame(to_gamegui);
+    wait_frame(to_gamegui);
+    let _ = to_gamegui
+        .send(move |lua| set_three_pos_springloaded(lua, s, ThreePosState::Stop))
+        .wait();
+    wait_switch_state(to_gamegui, s, 0.0);
+    wait_frame(to_gamegui);
+    wait_frame(to_gamegui);
+}
+
 fn ded_return(to_gamegui: &TaskSender<Lua>) {
-    actuate_momentary(to_gamegui, Switch::IcpDataRtnSeq, -1.0);
+    actuate_3pos_spring(to_gamegui, Switch::IcpDataRtnSeq, ThreePosState::Down);
 }
 
 fn ded_sequence(to_gamegui: &TaskSender<Lua>) {
-    actuate_momentary(to_gamegui, Switch::IcpDataRtnSeq, 1.0);
+    actuate_3pos_spring(to_gamegui, Switch::IcpDataRtnSeq, ThreePosState::Up);
 }
 
 fn ded_down(to_gamegui: &TaskSender<Lua>) {
@@ -296,6 +320,18 @@ fn ded_up(to_gamegui: &TaskSender<Lua>) {
 
 fn icp_list(to_gamegui: &TaskSender<Lua>) {
     actuate_momentary(to_gamegui, Switch::IcpList, 1.0);
+}
+
+fn ded_rocker_up(to_gamegui: &TaskSender<Lua>) {
+    actuate_3pos_spring(to_gamegui, Switch::IcpDedInc, ThreePosState::Up);
+}
+
+fn ded_rocker_down(to_gamegui: &TaskSender<Lua>) {
+    actuate_3pos_spring(to_gamegui, Switch::IcpDedInc, ThreePosState::Down);
+}
+
+fn wait_frame(to_gamegui: &TaskSender<Lua>) {
+    let _ = to_gamegui.send(|_| {}).wait();
 }
 
 fn icp_number(to_gamegui: &TaskSender<Lua>, number: i32) {
@@ -461,7 +497,13 @@ fn parse_quantity<T>(tree: &slab_tree::Tree<IndicationNode>, path: &Vec<&str>) -
 where
     T: std::str::FromStr,
 {
-    lookup_tree(tree, path)?.value.parse::<T>().ok()
+    let value = &lookup_tree(tree, path)?.value;
+    let parse_result = value.trim().parse::<T>();
+    if let Err(e) = parse_result {
+        log::error!("Error parsing path {path:?}, value was {value}");
+        return None;
+    };
+    parse_result.ok()
 }
 
 fn parse_bool(tree: &slab_tree::Tree<IndicationNode>, path: &Vec<&str>) -> Option<bool> {
@@ -473,6 +515,7 @@ fn parse_bool(tree: &slab_tree::Tree<IndicationNode>, path: &Vec<&str>) -> Optio
 }
 
 fn read_cmds_bingo_page(to_export: &TaskSender<Lua>) -> Option<CmdsBingo> {
+    let _ = super::get_avionics_indication(to_export, IndicationDevice::Ded as i32)?;
     let ded_indication = super::get_avionics_indication(to_export, IndicationDevice::Ded as i32)?;
 
     let chaff_count: i8 = parse_quantity(
@@ -503,6 +546,76 @@ fn read_cmds_bingo_page(to_export: &TaskSender<Lua>) -> Option<CmdsBingo> {
     })
 }
 
+fn parse_cmds_program_page(tree: &slab_tree::Tree<IndicationNode>) -> Option<CmdsProgramSlot> {
+    if lookup_tree(tree, &vec!["CMDS_Prog_label"]).is_none() {
+        log::warn!("Not on CMDS program page!");
+        return None;
+    }
+
+    let bq: i8 = parse_quantity(
+        tree,
+        &vec!["CMDS_BQ_Scratchpad_placeholder", "CMDS_BQ_Scratchpad"],
+    )?;
+
+    let bi: f32 = parse_quantity(
+        tree,
+        &vec!["CMDS_BI_Scratchpad_placeholder", "CMDS_BI_Scratchpad"],
+    )?;
+
+    let sq: i8 = parse_quantity(
+        tree,
+        &vec!["CMDS_SQ_Scratchpad_placeholder", "CMDS_SQ_Scratchpad"],
+    )?;
+
+    let si: f32 = parse_quantity(
+        tree,
+        &vec!["CMDS_SI_Scratchpad_placeholder", "CMDS_SI_Scratchpad"],
+    )?;
+
+    Some(CmdsProgramSlot {
+        burst_quantity: bq,
+        burst_interval: bi,
+        sequence_quantity: sq,
+        sequence_interval: si,
+    })
+}
+
+#[derive(Debug, PartialEq, Clone, Copy)]
+enum AvionicsError {
+    InvalidState,
+}
+
+fn wait_on_cmds_program(to_export: &TaskSender<Lua>) {
+    while (get_avionics_value(to_export, IndicationDevice::Ded, &vec!["CMDS_Prog_label"])).is_none()
+    {
+        log::info!("waiting on cmds program");
+    }
+}
+
+// Ensures that the DED is in the CMDS menu, on program 1, and with the chaff
+// bucket selected
+fn get_to_cmds_program_root(
+    to_export: &TaskSender<Lua>,
+    to_gamegui: &TaskSender<Lua>,
+) -> Result<(), AvionicsError> {
+    loop {
+        let tree = super::get_avionics_indication(to_export, IndicationDevice::Ded as i32)
+            .ok_or(AvionicsError::InvalidState)?;
+        let Some((kind, program)) = get_cmds_program(&tree) else {
+            return Err(AvionicsError::InvalidState);
+        };
+        if (kind, program) == (Countermeasure::Chaff, 1) {
+            return Ok(());
+        }
+        if kind != Countermeasure::Chaff {
+            ded_sequence(to_gamegui);
+        }
+        if program > 1 {
+            ded_rocker_down(to_gamegui);
+        }
+    }
+}
+
 fn read_cmds(to_export: &TaskSender<Lua>, to_gamegui: &TaskSender<Lua>) -> Option<AvionicsState> {
     while !is_on_cni(to_export) {
         ded_return(to_gamegui);
@@ -511,12 +624,55 @@ fn read_cmds(to_export: &TaskSender<Lua>, to_gamegui: &TaskSender<Lua>) -> Optio
     while !is_on_list(to_export) {}
     icp_number(to_gamegui, 7);
     while !is_on_cmds_bingo(to_export) {}
-    Some(AvionicsState {
-        cmds: Cmds {
-            bingo: read_cmds_bingo_page(to_export)?,
-            programs: Default::default(),
-        },
-    })
+    let mut avionics = AvionicsState::default();
+    avionics.cmds.bingo = read_cmds_bingo_page(to_export)?;
+    ded_sequence(to_gamegui);
+    wait_frame(to_gamegui);
+    wait_on_cmds_program(to_export);
+    get_to_cmds_program_root(to_export, to_gamegui).ok()?;
+
+    for ii in 0..6 {
+        let tree = super::get_avionics_indication(to_export, IndicationDevice::Ded as i32)?;
+        let (kind, program) = get_cmds_program(&tree)?;
+        if (Countermeasure::Chaff, ii + 1) != (kind, program) {
+            log::error!(
+                "Was not on correct page, expected {:?}, {}, got {:?}, {}",
+                Countermeasure::Chaff,
+                ii + 1,
+                kind,
+                program
+            );
+            return None;
+        }
+        avionics.cmds.programs[ii as usize].chaff = parse_cmds_program_page(&tree)?;
+        ded_rocker_up(to_gamegui);
+        wait_frame(to_gamegui);
+    }
+
+    ded_sequence(to_gamegui);
+    wait_frame(to_gamegui);
+    for ii in 0..6 {
+        let tree = super::get_avionics_indication(to_export, IndicationDevice::Ded as i32)?;
+        let (kind, program) = get_cmds_program(&tree)?;
+
+        if (Countermeasure::Flare, ii + 1) != (kind, program) {
+            log::error!(
+                "Was not on correct page, expected {:?}, {}, got {:?}, {}",
+                Countermeasure::Flare,
+                ii + 1,
+                kind,
+                program
+            );
+            return None;
+        }
+
+        avionics.cmds.programs[ii as usize].flare = parse_cmds_program_page(&tree)?;
+
+        ded_rocker_up(to_gamegui);
+        wait_frame(to_gamegui);
+    }
+
+    Some(avionics)
 }
 
 enum IndicationDevice {
@@ -568,6 +724,27 @@ fn is_on_list(to_export: &TaskSender<Lua>) -> bool {
 
 fn is_on_cmds_bingo(to_export: &TaskSender<Lua>) -> bool {
     get_avionics_value(to_export, IndicationDevice::Ded, &vec!["CMDS_BINGO_label"]).is_some()
+}
+
+#[derive(Debug, PartialEq, Clone, Copy)]
+enum Countermeasure {
+    Chaff,
+    Flare,
+}
+
+fn get_cmds_program(tree: &slab_tree::Tree<IndicationNode>) -> Option<(Countermeasure, i8)> {
+    lookup_tree(tree, &vec!["CMDS_Prog_label"])?;
+
+    let program_val = parse_quantity(tree, &vec!["CMDS_Selected_Program"]);
+    let chaff_val = lookup_tree(tree, &vec!["CMDS_CHAFF_label"]);
+    let flare_val = lookup_tree(tree, &vec!["CMDS_FLARE_label"]);
+    if chaff_val.is_some_and(|val| val.value == "CMDS CHAFF") {
+        Some((Countermeasure::Chaff, program_val?))
+    } else if flare_val.is_some_and(|val| val.value == "CMDS FLARE") {
+        Some((Countermeasure::Flare, program_val?))
+    } else {
+        None
+    }
 }
 
 fn throw_initial_switches(tx: &TaskSender<Lua>) {
@@ -890,7 +1067,6 @@ impl Fsm {
         let Some(txt) = val else {
             return;
         };
-        log::info!("Got text {txt}");
         if txt != "ALIGN" {
             return;
         }
