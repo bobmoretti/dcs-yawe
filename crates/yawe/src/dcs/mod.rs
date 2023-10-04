@@ -8,7 +8,11 @@ use mlua::Lua;
 use offload::TaskSender;
 use slab_tree::{NodeId, NodeRef, Tree};
 use std::str::FromStr;
+use std::sync::{Arc, Mutex};
+use trace::trace;
+trace::init_depth_var!();
 
+#[derive(Debug, PartialEq)]
 pub struct SwitchInfo<SwitchT> {
     pub switch: SwitchT,
     pub device_id: i32,
@@ -52,6 +56,31 @@ pub enum AircraftId {
     F_15ESE,
     F_15ESE_WSO,
     F_16C_50,
+    FA_18C_hornet,
+    M_2000C,
+    Mi_24P,
+    Mi_8MT,
+    Mi_8MT_Copilot,
+    Mi_8MT_FO,
+    MiG_21Bis,
+    SA342L,
+    Su_25,
+    Su_25T,
+    UH_1H,
+    Unknown(String),
+}
+
+#[allow(non_camel_case_types, dead_code)]
+pub enum AircraftState {
+    A_10C,
+    A_10C_2,
+    AH_64D_BLK_II,
+    AJS37,
+    AV8BNA,
+    F_14B,
+    F_15ESE,
+    F_15ESE_WSO,
+    F_16C_50(Arc<Mutex<f16c50::AvionicsState>>),
     FA_18C_hornet,
     M_2000C,
     Mi_24P,
@@ -221,6 +250,7 @@ pub fn set_lockon_command(lua: &Lua, command: LockonCommand) -> LuaResult<()> {
     send_command.call(command as i32)
 }
 
+#[trace(logging)]
 pub fn list_indication(lua: &Lua, device: i32) -> LuaResult<String> {
     let list_indication: LuaFunction = lua.globals().get("list_indication")?;
     list_indication.call(device)
@@ -356,6 +386,7 @@ pub fn lookup_tree<'a>(
     Some(tree.get(cur).unwrap().data())
 }
 
+#[trace(logging, disable(tree))]
 pub fn get_avionics_indication(
     to_export: &TaskSender<Lua>,
     device: i32,
@@ -376,6 +407,7 @@ pub fn get_avionics_indication(
     Some(parse_indication(&s))
 }
 
+#[trace(logging)]
 pub fn get_avionics_value(
     to_export: &TaskSender<Lua>,
     device: i32,

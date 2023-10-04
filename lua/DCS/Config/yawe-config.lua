@@ -1,5 +1,5 @@
 -- replace with your local paths
 dll_path = [[F:\projects\dcs\yawe\target\release\]]
 lua_path = [[F:\projects\dcs\yawe\lua\]]
-debug = true
+log_level = "debug"
 enable_object_log = false

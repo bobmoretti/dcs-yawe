@@ -3,6 +3,8 @@
 //! and await their results.
 
 use std::sync::mpsc::{channel, sync_channel, Receiver, RecvError, Sender, TryRecvError};
+use trace::trace;
+trace::init_depth_var!();
 
 /// Arbitrary work we can enqueue in a channel and then call in another thread
 /// on the receiving end.
@@ -31,7 +33,11 @@ pub struct Future<T> {
 impl<T> Future<T> {
     /// Returns the result, or a [`RecvError`] if this outlived the
     /// [`TaskSender`]
-    pub fn wait(self) -> Result<T, RecvError> {
+    #[trace(logging, disable(fun))]
+    pub fn wait(self) -> Result<T, RecvError>
+    where
+        T: std::fmt::Debug,
+    {
         self.rx.recv()
     }
 }
@@ -52,9 +58,10 @@ impl<ArgT> TaskSender<ArgT> {
 
     /// Push work onto the worker thread,
     /// returning a [`Future`] that can await the result.
+    #[trace(logging, disable(fun))]
     pub fn send<T, F>(&self, fun: F) -> Future<T>
     where
-        T: Send + 'static,
+        T: Send + 'static + std::fmt::Debug,
         F: FnOnce(&ArgT) -> T + Send + 'static,
     {
         let (tx, rx) = sync_channel(1);
@@ -75,9 +82,10 @@ impl<ArgT> TaskSender<ArgT> {
     ///
     /// Useful for other threads to serialize work on a worker calling
     /// [`tick()`]
+    #[trace(logging, disable(fun))]
     pub fn run<T, F>(&self, fun: F) -> T
     where
-        T: Send + 'static,
+        T: Send + 'static + std::fmt::Debug,
         F: FnOnce(&ArgT) -> T + Send + 'static,
     {
         // We shouldn't get an error here since `wait()`

@@ -45,9 +45,11 @@ impl App {
         let (tx_to_dcs_export, rx_from_dcs_export) = TaskSender::new();
         let (tx_to_app, rx_from_gui) = channel::<AppMessage>();
         let (tx_time, rx_time) = channel::<f32>();
+        let (app_runner, runner_from_gui) = TaskSender::<(TaskSender<Lua>, TaskSender<Lua>)>::new();
 
         let gui = gui::Handle::new(
             tx_to_app.clone(),
+            app_runner,
             tx_to_dcs_gamegui.clone(),
             tx_to_dcs_export.clone(),
         );
@@ -62,6 +64,7 @@ impl App {
                     tx_to_dcs_export,
                     handle,
                     rx_from_gui,
+                    runner_from_gui,
                     rx_time,
                 )
             })
@@ -189,6 +192,7 @@ fn app_thread_entry(
     sender_to_dcs_export: TaskSender<Lua>,
     gui_handle: gui::TxHandle,
     rx_from_gui: Receiver<AppMessage>,
+    runner_from_gui: Receiver<PackagedTask<(TaskSender<Lua>, TaskSender<Lua>)>>,
     time_channel: Receiver<f32>,
 ) {
     // need to dispatch between several
@@ -209,6 +213,12 @@ fn app_thread_entry(
         }
 
         sim_time = time_channel.try_recv().unwrap_or(sim_time);
+
+        while let Ok(_) = runner_from_gui
+            .try_recv()
+            .map(|job| job(&(sender_to_dcs_gamegui.clone(), sender_to_dcs_export.clone())))
+        {
+        }
 
         match rx_from_gui.try_recv() {
             Ok(msg) => match msg {

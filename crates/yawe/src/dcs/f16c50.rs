@@ -1,12 +1,16 @@
 #![allow(dead_code)]
 #![allow(unused_variables)]
+
 use crate::app::FsmMessage;
 use crate::dcs::{self, list_indication, set_lockon_command, LockonCommand, SwitchInfo};
 use egui_backend::egui;
 use mlua::prelude::LuaResult;
 use mlua::Lua;
 use offload::TaskSender;
+use std::sync::{Arc, Mutex};
 use strum::IntoStaticStr;
+use trace::trace;
+trace::init_depth_var!();
 
 use super::{lookup_tree, perform_click, IndicationNode};
 
@@ -225,6 +229,7 @@ fn get_switch_argument(s: Switch) -> i32 {
     }
 }
 
+#[trace(logging)]
 fn toggle_switch(lua: &Lua, s: Switch) -> LuaResult<()> {
     let i = get_switch_info(s);
     if let Some(info) = i {
@@ -235,6 +240,7 @@ fn toggle_switch(lua: &Lua, s: Switch) -> LuaResult<()> {
     }
 }
 
+#[trace(logging)]
 pub fn set_switch_state(lua: &Lua, s: Switch, state: f32) -> LuaResult<()> {
     let i = get_switch_info(s);
     if let Some(info) = i {
@@ -245,6 +251,7 @@ pub fn set_switch_state(lua: &Lua, s: Switch, state: f32) -> LuaResult<()> {
     }
 }
 
+#[trace(logging)]
 pub fn get_switch_state(lua: &Lua, s: Switch) -> LuaResult<f32> {
     let argument = get_switch_argument(s);
     dcs::get_switch_state(lua, 0, argument)
@@ -267,6 +274,7 @@ fn wait_switch_state(to_gamegui: &TaskSender<Lua>, s: Switch, value: f32) {
     }
 }
 
+#[trace(logging)]
 fn set_switch_and_wait(to_gamegui: &TaskSender<Lua>, s: Switch, value: f32) {
     let _ = to_gamegui
         .send(move |lua| set_switch_state(lua, s, value))
@@ -274,11 +282,13 @@ fn set_switch_and_wait(to_gamegui: &TaskSender<Lua>, s: Switch, value: f32) {
     wait_switch_state(to_gamegui, s, value)
 }
 
+#[trace(logging)]
 fn actuate_momentary(to_gamegui: &TaskSender<Lua>, s: Switch, value: f32) {
     set_switch_and_wait(to_gamegui, s, value);
     set_switch_and_wait(to_gamegui, s, 0.0);
 }
 
+#[trace(logging)]
 fn actuate_3pos_spring(to_gamegui: &TaskSender<Lua>, s: Switch, state: ThreePosState) {
     let _ = to_gamegui
         .send(move |lua| set_three_pos_springloaded(lua, s, state))
@@ -302,38 +312,47 @@ fn actuate_3pos_spring(to_gamegui: &TaskSender<Lua>, s: Switch, state: ThreePosS
     wait_frame(to_gamegui);
 }
 
+#[trace(logging)]
 fn ded_return(to_gamegui: &TaskSender<Lua>) {
     actuate_3pos_spring(to_gamegui, Switch::IcpDataRtnSeq, ThreePosState::Down);
 }
 
+#[trace(logging)]
 fn ded_sequence(to_gamegui: &TaskSender<Lua>) {
     actuate_3pos_spring(to_gamegui, Switch::IcpDataRtnSeq, ThreePosState::Up);
 }
 
+#[trace(logging)]
 fn ded_down(to_gamegui: &TaskSender<Lua>) {
     actuate_momentary(to_gamegui, Switch::IcpDataUpDown, -1.0);
 }
 
+#[trace(logging)]
 fn ded_up(to_gamegui: &TaskSender<Lua>) {
     actuate_momentary(to_gamegui, Switch::IcpDataUpDown, 1.0);
 }
 
+#[trace(logging)]
 fn icp_list(to_gamegui: &TaskSender<Lua>) {
     actuate_momentary(to_gamegui, Switch::IcpList, 1.0);
 }
 
+#[trace(logging)]
 fn ded_rocker_up(to_gamegui: &TaskSender<Lua>) {
     actuate_3pos_spring(to_gamegui, Switch::IcpDedInc, ThreePosState::Up);
 }
 
+#[trace(logging)]
 fn ded_rocker_down(to_gamegui: &TaskSender<Lua>) {
     actuate_3pos_spring(to_gamegui, Switch::IcpDedInc, ThreePosState::Down);
 }
 
+#[trace(logging)]
 fn wait_frame(to_gamegui: &TaskSender<Lua>) {
     let _ = to_gamegui.send(|_| {}).wait();
 }
 
+#[trace(logging)]
 fn icp_number(to_gamegui: &TaskSender<Lua>, number: i32) {
     let switch = match number {
         0 => Switch::Icp0,
@@ -351,10 +370,12 @@ fn icp_number(to_gamegui: &TaskSender<Lua>, number: i32) {
     actuate_momentary(to_gamegui, switch, 1.0);
 }
 
+#[trace(logging)]
 pub fn is_switch_set(lua: &Lua, s: Switch) -> LuaResult<bool> {
     Ok(get_switch_state(lua, s)? > 0.5)
 }
 
+#[trace(logging)]
 pub fn set_switch(lua: &Lua, s: Switch) -> LuaResult<()> {
     if !is_switch_set(lua, s)? {
         toggle_switch(lua, s)
@@ -363,6 +384,7 @@ pub fn set_switch(lua: &Lua, s: Switch) -> LuaResult<()> {
     }
 }
 
+#[trace(logging)]
 pub fn unset_switch(lua: &Lua, s: Switch) -> LuaResult<()> {
     if is_switch_set(lua, s)? {
         toggle_switch(lua, s)
@@ -371,6 +393,7 @@ pub fn unset_switch(lua: &Lua, s: Switch) -> LuaResult<()> {
     }
 }
 
+#[trace(logging)]
 fn set_three_pos_springloaded(lua: &Lua, s: Switch, state: ThreePosState) -> LuaResult<()> {
     let Info::SpringLoaded3Pos(three_pos_info) = &SWITCH_INFO_MAP[s as usize] else {
         log::warn!(
@@ -394,6 +417,8 @@ fn set_three_pos_springloaded(lua: &Lua, s: Switch, state: ThreePosState) -> Lua
     Ok(())
 }
 
+#[trace(logging)]
+#[trace(logging)]
 fn set_three_pos(
     to_gamegui: &TaskSender<Lua>,
     s: Switch,
@@ -437,6 +462,7 @@ fn set_three_pos(
     Ok(())
 }
 
+#[trace(logging)]
 fn poll_argument(to_gamegui: &TaskSender<Lua>, switch: Switch) -> Result<f32, crate::Error> {
     to_gamegui
         .send(move |lua| get_switch_state(lua, switch))
@@ -445,6 +471,7 @@ fn poll_argument(to_gamegui: &TaskSender<Lua>, switch: Switch) -> Result<f32, cr
         .map_err(|e| crate::Error::LuaError(e))
 }
 
+#[trace(logging)]
 fn handle_polling_err(r: &Result<f32, crate::Error>) {
     if let Err(err) = r {
         match err {
@@ -489,13 +516,14 @@ struct Cmds {
 }
 
 #[derive(Default, Debug, PartialEq, Clone)]
-struct AvionicsState {
+pub struct AvionicsState {
     cmds: Cmds,
 }
 
+#[trace(logging, disable(tree))]
 fn parse_quantity<T>(tree: &slab_tree::Tree<IndicationNode>, path: &Vec<&str>) -> Option<T>
 where
-    T: std::str::FromStr,
+    T: std::str::FromStr + std::fmt::Debug,
 {
     let value = &lookup_tree(tree, path)?.value;
     let parse_result = value.trim().parse::<T>();
@@ -506,6 +534,7 @@ where
     parse_result.ok()
 }
 
+#[trace(logging, disable(tree))]
 fn parse_bool(tree: &slab_tree::Tree<IndicationNode>, path: &Vec<&str>) -> Option<bool> {
     match lookup_tree(tree, path)?.value.as_str() {
         "ON" => Some(true),
@@ -514,6 +543,7 @@ fn parse_bool(tree: &slab_tree::Tree<IndicationNode>, path: &Vec<&str>) -> Optio
     }
 }
 
+#[trace(logging, pretty)]
 fn read_cmds_bingo_page(to_export: &TaskSender<Lua>) -> Option<CmdsBingo> {
     let _ = super::get_avionics_indication(to_export, IndicationDevice::Ded as i32)?;
     let ded_indication = super::get_avionics_indication(to_export, IndicationDevice::Ded as i32)?;
@@ -546,6 +576,7 @@ fn read_cmds_bingo_page(to_export: &TaskSender<Lua>) -> Option<CmdsBingo> {
     })
 }
 
+#[trace(logging, disable(tree))]
 fn parse_cmds_program_page(tree: &slab_tree::Tree<IndicationNode>) -> Option<CmdsProgramSlot> {
     if lookup_tree(tree, &vec!["CMDS_Prog_label"]).is_none() {
         log::warn!("Not on CMDS program page!");
@@ -585,6 +616,7 @@ enum AvionicsError {
     InvalidState,
 }
 
+#[trace(logging)]
 fn wait_on_cmds_program(to_export: &TaskSender<Lua>) {
     while (get_avionics_value(to_export, IndicationDevice::Ded, &vec!["CMDS_Prog_label"])).is_none()
     {
@@ -594,9 +626,10 @@ fn wait_on_cmds_program(to_export: &TaskSender<Lua>) {
 
 // Ensures that the DED is in the CMDS menu, on program 1, and with the chaff
 // bucket selected
+#[trace(logging)]
 fn get_to_cmds_program_root(
-    to_export: &TaskSender<Lua>,
     to_gamegui: &TaskSender<Lua>,
+    to_export: &TaskSender<Lua>,
 ) -> Result<(), AvionicsError> {
     loop {
         let tree = super::get_avionics_indication(to_export, IndicationDevice::Ded as i32)
@@ -616,7 +649,8 @@ fn get_to_cmds_program_root(
     }
 }
 
-fn read_cmds(to_export: &TaskSender<Lua>, to_gamegui: &TaskSender<Lua>) -> Option<AvionicsState> {
+#[trace(logging)]
+fn read_cmds(to_gamegui: &TaskSender<Lua>, to_export: &TaskSender<Lua>) -> Option<AvionicsState> {
     while !is_on_cni(to_export) {
         ded_return(to_gamegui);
     }
@@ -629,7 +663,7 @@ fn read_cmds(to_export: &TaskSender<Lua>, to_gamegui: &TaskSender<Lua>) -> Optio
     ded_sequence(to_gamegui);
     wait_frame(to_gamegui);
     wait_on_cmds_program(to_export);
-    get_to_cmds_program_root(to_export, to_gamegui).ok()?;
+    get_to_cmds_program_root(to_gamegui, to_export).ok()?;
 
     for ii in 0..6 {
         let tree = super::get_avionics_indication(to_export, IndicationDevice::Ded as i32)?;
@@ -675,6 +709,7 @@ fn read_cmds(to_export: &TaskSender<Lua>, to_gamegui: &TaskSender<Lua>) -> Optio
     Some(avionics)
 }
 
+#[derive(Debug, PartialEq, Clone, Copy)]
 enum IndicationDevice {
     Hud = 1,
     LeftMfd = 4,
@@ -692,6 +727,7 @@ fn get_avionics_indication(lua: &Lua, device: IndicationDevice) -> LuaResult<Str
     list_indication(lua, device as i32)
 }
 
+#[trace(logging)]
 fn get_avionics_value(
     to_export: &TaskSender<Lua>,
     device: IndicationDevice,
@@ -700,6 +736,7 @@ fn get_avionics_value(
     super::get_avionics_value(&to_export, device as i32, path)
 }
 
+#[trace(logging)]
 fn get_hud_align_value(to_export: &TaskSender<Lua>) -> Option<String> {
     get_avionics_value(
         &to_export,
@@ -714,14 +751,17 @@ fn get_hud_align_value(to_export: &TaskSender<Lua>) -> Option<String> {
     )
 }
 
+#[trace(logging)]
 fn is_on_cni(to_export: &TaskSender<Lua>) -> bool {
     get_avionics_value(to_export, IndicationDevice::Ded, &vec!["DED CNI TACAN PH"]).is_some()
 }
 
+#[trace(logging)]
 fn is_on_list(to_export: &TaskSender<Lua>) -> bool {
     get_avionics_value(to_export, IndicationDevice::Ded, &vec!["LIST Label"]).is_some()
 }
 
+#[trace(logging)]
 fn is_on_cmds_bingo(to_export: &TaskSender<Lua>) -> bool {
     get_avionics_value(to_export, IndicationDevice::Ded, &vec!["CMDS_BINGO_label"]).is_some()
 }
@@ -732,6 +772,7 @@ enum Countermeasure {
     Flare,
 }
 
+#[trace(logging, disable(tree))]
 fn get_cmds_program(tree: &slab_tree::Tree<IndicationNode>) -> Option<(Countermeasure, i8)> {
     lookup_tree(tree, &vec!["CMDS_Prog_label"])?;
 
@@ -1100,9 +1141,124 @@ impl Fsm {
     fn done(&self, event: crate::app::FsmMessage) {}
 }
 
-pub fn make_widget(ui: &mut egui::Ui, to_gamegui: &TaskSender<Lua>, to_export: &TaskSender<Lua>) {
-    if ui.button("Get avionics state").clicked() {
-        let result = read_cmds(to_export, to_gamegui);
-        log::info!("{result:?}");
+fn bool_to_on_off(state: bool) -> &'static str {
+    if state {
+        "ON"
+    } else {
+        "OFF"
     }
+}
+
+fn add_quantity<T>(row: &mut egui_extras::TableRow, quantity: T)
+where
+    T: std::string::ToString,
+{
+    row.col(|ui| {
+        ui.label(quantity.to_string());
+    });
+}
+
+fn make_slot_row(row: &mut egui_extras::TableRow, cmds_program_slot: &CmdsProgramSlot) {
+    add_quantity(row, cmds_program_slot.burst_quantity);
+    add_quantity(row, cmds_program_slot.burst_interval);
+    add_quantity(row, cmds_program_slot.sequence_quantity);
+    add_quantity(row, cmds_program_slot.sequence_interval);
+}
+
+pub fn make_widget(
+    ui: &mut egui::Ui,
+    to_app: &TaskSender<(TaskSender<Lua>, TaskSender<Lua>)>,
+    state: Arc<Mutex<AvionicsState>>,
+) {
+    egui::CollapsingHeader::new("Countermeasures")
+        .default_open(false)
+        .show(ui, move |ui| {
+            let s = state.clone();
+            let text_height = egui::TextStyle::Body.resolve(ui.style()).size;
+
+            if ui.button("Read").clicked() {
+                to_app.send(move |(to_gamegui, to_export)| {
+                    let result = read_cmds(&to_gamegui, &to_export);
+                    *s.clone().lock().unwrap() = result.unwrap();
+                });
+            }
+
+            let cmds = &state.lock().unwrap().cmds;
+
+            let grid = egui::Grid::new("cmds_bingo_grid")
+                .num_columns(2)
+                .striped(true)
+                .show(ui, |ui| {
+                    ui.heading("Bingo quantities");
+                    ui.end_row();
+                    ui.label("Flare bingo quantity");
+                    ui.label(format!("{}", cmds.bingo.flare));
+                    ui.end_row();
+
+                    ui.label("Chaff bingo quantity");
+                    ui.label(format!("{}", cmds.bingo.chaff));
+                    ui.end_row();
+
+                    ui.heading("Audible warnings");
+                    ui.end_row();
+
+                    ui.label("Feedback");
+                    ui.label(bool_to_on_off(cmds.bingo.feedback));
+                    ui.end_row();
+
+                    ui.label("Request countermeasures");
+                    ui.label(bool_to_on_off(cmds.bingo.reqctr));
+                    ui.end_row();
+
+                    ui.label("Bingo");
+                    ui.label(bool_to_on_off(cmds.bingo.bingo));
+                    ui.end_row();
+                });
+
+            ui.heading("Programs");
+            use egui_extras::{Column, TableBuilder};
+
+            let table = TableBuilder::new(ui)
+                .striped(true)
+                .column(Column::auto())
+                .column(Column::auto())
+                .column(Column::auto())
+                .column(Column::auto())
+                .column(Column::auto());
+
+            table
+                .header(text_height * 1.1, |mut header| {
+                    header.col(|ui| {
+                        ui.strong("");
+                    });
+                    header.col(|ui| {
+                        ui.strong("Burst quantity");
+                    });
+                    header.col(|ui| {
+                        ui.strong("Burst interval");
+                    });
+                    header.col(|ui| {
+                        ui.strong("Sequence quantity");
+                    });
+                    header.col(|ui| {
+                        ui.strong("Sequence interval");
+                    });
+                })
+                .body(|mut body| {
+                    for idx in 0..6 {
+                        body.row(text_height, |mut row| {
+                            row.col(|ui| {
+                                ui.strong(format!("Program {} chaff", idx + 1));
+                            });
+                            make_slot_row(&mut row, &cmds.programs[idx].chaff);
+                        });
+                        body.row(18.0, |mut row| {
+                            row.col(|ui| {
+                                ui.strong(format!("Program {} flare", idx + 1));
+                            });
+                            make_slot_row(&mut row, &cmds.programs[idx].flare);
+                        });
+                    }
+                })
+        });
 }

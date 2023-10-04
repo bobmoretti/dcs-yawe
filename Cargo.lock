@@ -430,6 +430,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "egui_extras"
+version = "0.22.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9278f4337b526f0d57e5375e5a7340a311fa6ee8f9fcc75721ac50af13face02"
+dependencies = [
+ "egui",
+ "serde",
+]
+
+[[package]]
 name = "egui_render_glow"
 version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1197,6 +1207,10 @@ dependencies = [
 [[package]]
 name = "offload"
 version = "0.1.0"
+dependencies = [
+ "log",
+ "trace",
+]
 
 [[package]]
 name = "once_cell"
@@ -2260,6 +2274,7 @@ dependencies = [
  "chrono",
  "config",
  "egui_backend",
+ "egui_extras",
  "egui_render_glow",
  "egui_window_glfw_passthrough",
  "fern",

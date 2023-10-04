@@ -38,10 +38,14 @@ fn setup_logging(config: &config::Config, mut console: File) -> Result<(), fern:
     let colors_level = colors_line.clone().info(Color::Green);
 
     use log::LevelFilter;
-    let level = if config.debug {
-        LevelFilter::Info
-    } else {
-        LevelFilter::Info
+    let level = match config.log_level.to_lowercase().as_str() {
+        "trace" => LevelFilter::Trace,
+        "debug" => LevelFilter::Debug,
+        "warn" => LevelFilter::Warn,
+        "error" => LevelFilter::Error,
+        "off" => LevelFilter::Off,
+        "info" => LevelFilter::Info,
+        _ => LevelFilter::Warn,
     };
 
     let logdir = Path::new(config.write_dir.as_str())

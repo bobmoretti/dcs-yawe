@@ -21,7 +21,7 @@ struct Gui {
     rx: Receiver<Message>,
     tx: Sender<app::AppMessage>,
     to_dcs_gamegui: TaskSender<Lua>,
-    to_dcs_export: TaskSender<Lua>,
+    _to_dcs_export: TaskSender<Lua>,
     aircraft_type: dcs::AircraftId,
     startup_progress: f32,
     pub egui_context: egui::Context,
@@ -32,6 +32,8 @@ struct Gui {
     debug_widget_visible: bool,
     startup_text: String,
     paused: bool,
+    aircraft_state: dcs::AircraftState,
+    app_runner: TaskSender<(TaskSender<Lua>, TaskSender<Lua>)>,
 }
 
 // The following hackery is based on the thread:
@@ -150,6 +152,7 @@ impl Gui {
         to_dcs_gamegui: TaskSender<Lua>,
         to_dcs_export: TaskSender<Lua>,
         context: egui::Context,
+        app_runner: TaskSender<(TaskSender<Lua>, TaskSender<Lua>)>,
     ) -> Self {
         let mut glfw_backend = GlfwBackend::new(Default::default(), BackendConfig::default());
         glfw_backend.window.set_decorated(false);
@@ -163,7 +166,7 @@ impl Gui {
             rx: rx,
             tx: tx,
             to_dcs_gamegui,
-            to_dcs_export,
+            _to_dcs_export: to_dcs_export,
             aircraft_type: dcs::AircraftId::Unknown("".to_string()),
             startup_progress: 0.0,
             glfw_backend: glfw_backend,
@@ -178,6 +181,8 @@ impl Gui {
             debug_widget_visible: false,
             startup_text: String::default(),
             paused: false,
+            aircraft_state: dcs::AircraftState::Unknown("".to_string()),
+            app_runner: app_runner,
         }
     }
 
@@ -187,12 +192,12 @@ impl Gui {
 
     fn make_aircraft_specific_widget(&mut self, ui: &mut egui::Ui) {
         ui.label("Aircraft options");
-        match self.aircraft_type {
-            dcs::AircraftId::MiG_21Bis => {
+        match &self.aircraft_state {
+            dcs::AircraftState::MiG_21Bis => {
                 dcs::mig21bis::make_debug_widget(ui, &mut self.switch_vals, &self.to_dcs_gamegui)
             }
-            dcs::AircraftId::F_16C_50 => {
-                dcs::f16c50::make_widget(ui, &self.to_dcs_gamegui, &self.to_dcs_export)
+            dcs::AircraftState::F_16C_50(state) => {
+                dcs::f16c50::make_widget(ui, &self.app_runner, state.clone())
             }
             _ => (),
         };
@@ -238,7 +243,7 @@ impl UserApp for Gui {
                     return;
                 }
                 Message::UpdateOwnship(kind) => {
-                    let num_switches = match kind {
+                    let num_switches = match &kind {
                         dcs::AircraftId::MiG_21Bis => dcs::mig21bis::Switch::NumSwitches as usize,
                         dcs::AircraftId::F_16C_50 => dcs::f16c50::Switch::NumSwitches as usize,
                         _ => 0 as usize,
@@ -246,6 +251,13 @@ impl UserApp for Gui {
                     let mut v = Vec::with_capacity(num_switches as usize);
                     v.resize(num_switches as usize, String::new());
                     self.switch_vals = v;
+                    self.aircraft_state = match &kind {
+                        dcs::AircraftId::MiG_21Bis => dcs::AircraftState::MiG_21Bis,
+                        dcs::AircraftId::F_16C_50 => {
+                            dcs::AircraftState::F_16C_50(Default::default())
+                        }
+                        _ => dcs::AircraftState::Unknown("".to_string()),
+                    };
                     self.aircraft_type = kind;
                 }
                 Message::UpdateStartupProgress(progress) => self.startup_progress = progress,
@@ -305,9 +317,10 @@ fn do_gui(
     to_dcs_gamegui: TaskSender<Lua>,
     to_dcs_export: TaskSender<Lua>,
     context: egui::Context,
+    app_runner: TaskSender<(TaskSender<Lua>, TaskSender<Lua>)>,
 ) {
     log::info!("Starting gui");
-    let gui = Gui::new(rx, tx, to_dcs_gamegui, to_dcs_export, context);
+    let gui = Gui::new(rx, tx, to_dcs_gamegui, to_dcs_export, context, app_runner);
     <Gui as UserApp>::UserWindowBackend::run_event_loop(gui);
 
     log::info!("Gui closed");
@@ -395,6 +408,7 @@ pub struct Handle {
 impl Handle {
     pub fn new(
         tx_to_app: Sender<app::AppMessage>,
+        app_runner: TaskSender<(TaskSender<Lua>, TaskSender<Lua>)>,
         to_dcs_gamegui: TaskSender<Lua>,
         to_dcs_export: TaskSender<Lua>,
     ) -> Self {
@@ -405,7 +419,14 @@ impl Handle {
         let thread = std::thread::Builder::new()
             .name("yawe-gui".to_string())
             .spawn(move || {
-                do_gui(rx, tx_to_app, to_dcs_gamegui, to_dcs_export, context);
+                do_gui(
+                    rx,
+                    tx_to_app,
+                    to_dcs_gamegui,
+                    to_dcs_export,
+                    context,
+                    app_runner,
+                );
             })
             .unwrap();
         Handle {

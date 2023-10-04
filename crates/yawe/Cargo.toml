@@ -12,6 +12,7 @@ crate-type = ["cdylib"]
 chrono = "0.4.24"
 config = {path = "../config"}
 egui_backend = "0.4.0"
+egui_extras = "0.22.0"
 egui_render_glow = "0.4.2"
 egui_window_glfw_passthrough = "0.4.2"
 fern = {version = "^0.6.1", features = ["colored"]}

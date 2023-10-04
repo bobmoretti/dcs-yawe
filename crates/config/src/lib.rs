@@ -5,7 +5,7 @@ pub struct Config {
     pub write_dir: String,
     pub lua_path: String,
     pub dll_path: String,
-    pub debug: bool,
+    pub log_level: String,
 }
 
 impl<'lua> mlua::FromLua<'lua> for Config {
