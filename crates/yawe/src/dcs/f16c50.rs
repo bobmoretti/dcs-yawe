@@ -7,6 +7,8 @@ use egui_backend::egui;
 use mlua::prelude::LuaResult;
 use mlua::Lua;
 use offload::TaskSender;
+use std::fmt::Display;
+use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 use strum::IntoStaticStr;
 use trace::trace;
@@ -520,11 +522,6 @@ pub struct AvionicsState {
     cmds: Cmds,
 }
 
-#[derive(Default, Debug, Clone)]
-pub struct Gui {
-    avionics: Arc<Mutex<AvionicsState>>,
-}
-
 #[trace(logging, disable(tree))]
 fn parse_quantity<T>(tree: &slab_tree::Tree<IndicationNode>, path: &Vec<&str>) -> Option<T>
 where
@@ -654,7 +651,7 @@ fn get_to_cmds_program_root(
     }
 }
 
-#[trace(logging)]
+#[trace(logging, pretty)]
 fn read_cmds(to_gamegui: &TaskSender<Lua>, to_export: &TaskSender<Lua>) -> Option<AvionicsState> {
     while !is_on_cni(to_export) {
         ded_return(to_gamegui);
@@ -1170,6 +1167,35 @@ fn make_slot_row(row: &mut egui_extras::TableRow, cmds_program_slot: &CmdsProgra
     add_quantity(row, cmds_program_slot.sequence_interval);
 }
 
+#[derive(Default, Debug, Clone)]
+struct EditTracker {
+    edited: bool,
+}
+
+impl EditTracker {
+    fn update(&mut self, updated: bool) {
+        self.edited = self.edited || updated;
+    }
+    fn add_text_parser<T, F>(&mut self, ui: &mut egui::Ui, txt: &mut String, val: &mut T, parser: F)
+    where
+        F: FnOnce(&String) -> T,
+        T: FromStr + Display,
+    {
+        ui.label(format!("{}", val));
+        let edited = ui.text_edit_singleline(txt).changed();
+        self.update(edited);
+        *val = parser(txt);
+    }
+}
+
+#[derive(Default, Debug, Clone)]
+pub struct Gui {
+    avionics: Arc<Mutex<AvionicsState>>,
+    edit_tracker: EditTracker,
+    flare_bingo_quantity_raw: String,
+    chaff_bingo_quantity_raw: String,
+}
+
 impl Gui {
     pub fn make_widget(
         &mut self,
@@ -1192,42 +1218,58 @@ impl Gui {
                 let strong_heading =
                     |ui: &mut egui::Ui, txt| ui.heading(egui::RichText::new(txt).strong());
 
-                let cmds = &self.avionics.lock().unwrap().cmds;
-                let mut flare_bingo = String::new();
-                let mut chaff_bingo = String::new();
+                let cmds = &mut self.avionics.lock().unwrap().cmds;
 
+                let parse_bingo_quantity = |raw: &String| {
+                    let val: i8 = raw.parse().unwrap_or(0);
+                    val.clamp(0, 99)
+                };
+
+                ui.separator();
                 let grid = egui::Grid::new("cmds_bingo_grid")
                     .num_columns(3)
                     .striped(true)
                     .show(ui, |ui| {
-                        strong_heading(ui, "Bingo quantities");
+                        ui.strong("Bingo quantities");
                         ui.end_row();
                         ui.label("Flare bingo quantity");
-                        ui.label(format!("{}", cmds.bingo.flare));
-                        ui.text_edit_singleline(&mut flare_bingo);
+                        self.edit_tracker.add_text_parser(
+                            ui,
+                            &mut self.flare_bingo_quantity_raw,
+                            &mut cmds.bingo.flare,
+                            parse_bingo_quantity,
+                        );
                         ui.end_row();
 
                         ui.label("Chaff bingo quantity");
-                        ui.label(format!("{}", cmds.bingo.chaff));
-                        ui.text_edit_singleline(&mut chaff_bingo);
+                        self.edit_tracker.add_text_parser(
+                            ui,
+                            &mut self.chaff_bingo_quantity_raw,
+                            &mut cmds.bingo.chaff,
+                            parse_bingo_quantity,
+                        );
                         ui.end_row();
 
-                        strong_heading(ui, "Audible warnings");
+                        ui.strong("Audible warnings");
                         ui.end_row();
 
                         ui.label("Feedback");
                         ui.label(bool_to_on_off(cmds.bingo.feedback));
+                        ui.checkbox(&mut cmds.bingo.feedback, "");
                         ui.end_row();
 
                         ui.label("Request countermeasures");
                         ui.label(bool_to_on_off(cmds.bingo.reqctr));
+                        ui.checkbox(&mut cmds.bingo.reqctr, "");
                         ui.end_row();
 
                         ui.label("Bingo");
                         ui.label(bool_to_on_off(cmds.bingo.bingo));
+                        ui.checkbox(&mut cmds.bingo.bingo, "");
                         ui.end_row();
                     });
 
+                ui.separator();
                 strong_heading(ui, "Programs");
                 use egui_extras::{Column, TableBuilder};
 

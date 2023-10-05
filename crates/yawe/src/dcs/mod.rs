@@ -337,20 +337,20 @@ fn parse_indication(s: &str) -> Tree<IndicationNode> {
     tree
 }
 
-pub fn _traverse_tree(t: &Tree<IndicationNode>) {
-    _traverse_node(t.root().unwrap(), 0);
+pub fn _traverse_tree<F>(t: &Tree<IndicationNode>, visitor: F) -> ()
+where
+    F: FnOnce(&NodeRef<IndicationNode>, i32) -> () + Copy,
+{
+    _traverse_node(t.root().unwrap(), 0, visitor);
 }
 
-fn _traverse_node(n: NodeRef<IndicationNode>, depth: i32) {
-    let mut s = String::default();
-    for _ in 0..depth {
-        s += &("    ");
-    }
-
-    let data = n.data();
-    log::info!("{s}{data:?}\n");
+fn _traverse_node<F>(n: NodeRef<IndicationNode>, depth: i32, visitor: F) -> ()
+where
+    F: FnOnce(&NodeRef<IndicationNode>, i32) -> () + Copy,
+{
+    visitor(&n, depth);
     for child in n.children() {
-        _traverse_node(child, depth + 1);
+        _traverse_node(child, depth + 1, visitor);
     }
 }
 
@@ -386,7 +386,6 @@ pub fn lookup_tree<'a>(
     Some(tree.get(cur).unwrap().data())
 }
 
-#[trace(logging, disable())]
 pub fn get_avionics_indication(
     to_export: &TaskSender<Lua>,
     device: i32,
@@ -395,15 +394,29 @@ pub fn get_avionics_indication(
         .send(move |lua| list_indication(lua, device))
         .wait()
     else {
+        log::warn!("get_avionics_indication: list_indication failed (thread communication)");
         return None;
     };
     let Ok(s) = lua_result else {
+        log::warn!("get_avionics_indication: list_indication failed (Lua)");
         return None;
     };
 
     if s.trim().is_empty() {
+        log::warn!("get_avionics_indication: list_indication empty");
         return None;
     }
+    let tree = parse_indication(&s);
+    log::trace!("get_avionics-indication:");
+    _traverse_tree(&tree, |node, depth| {
+        let mut s = String::default();
+        for _ in 0..depth {
+            s += &("    ");
+        }
+
+        let data = node.data();
+        log::trace!("{s}{data:?}");
+    });
     Some(parse_indication(&s))
 }
 
@@ -435,7 +448,15 @@ mod test {
             panic!("Can't find test");
         };
         let tree = parse_indication(&s);
-        _traverse_tree(&tree);
+        _traverse_tree(&tree, |n, depth| {
+            let mut s = String::default();
+            for _ in 0..depth {
+                s += &("    ");
+            }
+
+            let data = n.data();
+            print!("{s}{data:?}\n");
+        });
         let s = lookup_tree(
             &tree,
             &vec![
