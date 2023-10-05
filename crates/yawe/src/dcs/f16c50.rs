@@ -520,6 +520,11 @@ pub struct AvionicsState {
     cmds: Cmds,
 }
 
+#[derive(Default, Debug, Clone)]
+pub struct Gui {
+    avionics: Arc<Mutex<AvionicsState>>,
+}
+
 #[trace(logging, disable(tree))]
 fn parse_quantity<T>(tree: &slab_tree::Tree<IndicationNode>, path: &Vec<&str>) -> Option<T>
 where
@@ -1165,100 +1170,109 @@ fn make_slot_row(row: &mut egui_extras::TableRow, cmds_program_slot: &CmdsProgra
     add_quantity(row, cmds_program_slot.sequence_interval);
 }
 
-pub fn make_widget(
-    ui: &mut egui::Ui,
-    to_app: &TaskSender<(TaskSender<Lua>, TaskSender<Lua>)>,
-    state: Arc<Mutex<AvionicsState>>,
-) {
-    egui::CollapsingHeader::new("Countermeasures")
-        .default_open(false)
-        .show(ui, move |ui| {
-            let s = state.clone();
-            let text_height = egui::TextStyle::Body.resolve(ui.style()).size;
+impl Gui {
+    pub fn make_widget(
+        &mut self,
+        ui: &mut egui::Ui,
+        to_app: &TaskSender<(TaskSender<Lua>, TaskSender<Lua>)>,
+    ) {
+        egui::CollapsingHeader::new("Countermeasures")
+            .default_open(false)
+            .show(ui, move |ui| {
+                let s = self.avionics.clone();
+                let text_height = egui::TextStyle::Body.resolve(ui.style()).size;
 
-            if ui.button("Read").clicked() {
-                to_app.send(move |(to_gamegui, to_export)| {
-                    let result = read_cmds(&to_gamegui, &to_export);
-                    *s.clone().lock().unwrap() = result.unwrap();
-                });
-            }
-
-            let cmds = &state.lock().unwrap().cmds;
-
-            let grid = egui::Grid::new("cmds_bingo_grid")
-                .num_columns(2)
-                .striped(true)
-                .show(ui, |ui| {
-                    ui.heading("Bingo quantities");
-                    ui.end_row();
-                    ui.label("Flare bingo quantity");
-                    ui.label(format!("{}", cmds.bingo.flare));
-                    ui.end_row();
-
-                    ui.label("Chaff bingo quantity");
-                    ui.label(format!("{}", cmds.bingo.chaff));
-                    ui.end_row();
-
-                    ui.heading("Audible warnings");
-                    ui.end_row();
-
-                    ui.label("Feedback");
-                    ui.label(bool_to_on_off(cmds.bingo.feedback));
-                    ui.end_row();
-
-                    ui.label("Request countermeasures");
-                    ui.label(bool_to_on_off(cmds.bingo.reqctr));
-                    ui.end_row();
-
-                    ui.label("Bingo");
-                    ui.label(bool_to_on_off(cmds.bingo.bingo));
-                    ui.end_row();
-                });
-
-            ui.heading("Programs");
-            use egui_extras::{Column, TableBuilder};
-
-            let table = TableBuilder::new(ui)
-                .striped(true)
-                .column(Column::auto())
-                .column(Column::auto())
-                .column(Column::auto())
-                .column(Column::auto())
-                .column(Column::auto());
-
-            table
-                .header(text_height * 1.1, |mut header| {
-                    header.col(|ui| {
-                        ui.strong("");
+                if ui.button("Read").clicked() {
+                    to_app.send(move |(to_gamegui, to_export)| {
+                        let result = read_cmds(&to_gamegui, &to_export);
+                        *s.clone().lock().unwrap() = result.unwrap();
                     });
-                    header.col(|ui| {
-                        ui.strong("Burst quantity");
+                }
+
+                let strong_heading =
+                    |ui: &mut egui::Ui, txt| ui.heading(egui::RichText::new(txt).strong());
+
+                let cmds = &self.avionics.lock().unwrap().cmds;
+                let mut flare_bingo = String::new();
+                let mut chaff_bingo = String::new();
+
+                let grid = egui::Grid::new("cmds_bingo_grid")
+                    .num_columns(3)
+                    .striped(true)
+                    .show(ui, |ui| {
+                        strong_heading(ui, "Bingo quantities");
+                        ui.end_row();
+                        ui.label("Flare bingo quantity");
+                        ui.label(format!("{}", cmds.bingo.flare));
+                        ui.text_edit_singleline(&mut flare_bingo);
+                        ui.end_row();
+
+                        ui.label("Chaff bingo quantity");
+                        ui.label(format!("{}", cmds.bingo.chaff));
+                        ui.text_edit_singleline(&mut chaff_bingo);
+                        ui.end_row();
+
+                        strong_heading(ui, "Audible warnings");
+                        ui.end_row();
+
+                        ui.label("Feedback");
+                        ui.label(bool_to_on_off(cmds.bingo.feedback));
+                        ui.end_row();
+
+                        ui.label("Request countermeasures");
+                        ui.label(bool_to_on_off(cmds.bingo.reqctr));
+                        ui.end_row();
+
+                        ui.label("Bingo");
+                        ui.label(bool_to_on_off(cmds.bingo.bingo));
+                        ui.end_row();
                     });
-                    header.col(|ui| {
-                        ui.strong("Burst interval");
-                    });
-                    header.col(|ui| {
-                        ui.strong("Sequence quantity");
-                    });
-                    header.col(|ui| {
-                        ui.strong("Sequence interval");
-                    });
-                })
-                .body(|mut body| {
-                    for idx in 0..6 {
-                        body.row(text_height, |mut row| {
-                            row.col(|ui| {
-                                ui.strong(format!("Program {} chaff", idx + 1));
-                            });
-                            make_slot_row(&mut row, &cmds.programs[idx].chaff);
+
+                strong_heading(ui, "Programs");
+                use egui_extras::{Column, TableBuilder};
+
+                let table = TableBuilder::new(ui)
+                    .striped(true)
+                    .column(Column::auto())
+                    .column(Column::auto())
+                    .column(Column::auto())
+                    .column(Column::auto())
+                    .column(Column::auto());
+
+                table
+                    .header(text_height * 1.1, |mut header| {
+                        header.col(|ui| {
+                            ui.strong("");
                         });
-                        body.row(18.0, |mut row| {
-                            row.col(|ui| {
-                                ui.strong(format!("Program {} flare", idx + 1));
-                            });
-                            make_slot_row(&mut row, &cmds.programs[idx].flare);
+                        header.col(|ui| {
+                            ui.strong("Burst quantity");
                         });
-                    }
-                })
-        });
+                        header.col(|ui| {
+                            ui.strong("Burst interval");
+                        });
+                        header.col(|ui| {
+                            ui.strong("Sequence quantity");
+                        });
+                        header.col(|ui| {
+                            ui.strong("Sequence interval");
+                        });
+                    })
+                    .body(|mut body| {
+                        for idx in 0..6 {
+                            body.row(text_height, |mut row| {
+                                row.col(|ui| {
+                                    ui.strong(format!("Program {} chaff", idx + 1));
+                                });
+                                make_slot_row(&mut row, &cmds.programs[idx].chaff);
+                            });
+                            body.row(18.0, |mut row| {
+                                row.col(|ui| {
+                                    ui.strong(format!("Program {} flare", idx + 1));
+                                });
+                                make_slot_row(&mut row, &cmds.programs[idx].flare);
+                            });
+                        }
+                    })
+            });
+    }
 }

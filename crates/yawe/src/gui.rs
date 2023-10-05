@@ -192,13 +192,11 @@ impl Gui {
 
     fn make_aircraft_specific_widget(&mut self, ui: &mut egui::Ui) {
         ui.label("Aircraft options");
-        match &self.aircraft_state {
+        match &mut self.aircraft_state {
             dcs::AircraftState::MiG_21Bis => {
                 dcs::mig21bis::make_debug_widget(ui, &mut self.switch_vals, &self.to_dcs_gamegui)
             }
-            dcs::AircraftState::F_16C_50(state) => {
-                dcs::f16c50::make_widget(ui, &self.app_runner, state.clone())
-            }
+            dcs::AircraftState::F_16C_50(gui) => gui.make_widget(ui, &self.app_runner),
             _ => (),
         };
     }

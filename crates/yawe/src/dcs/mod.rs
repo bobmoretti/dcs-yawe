@@ -80,7 +80,7 @@ pub enum AircraftState {
     F_14B,
     F_15ESE,
     F_15ESE_WSO,
-    F_16C_50(Arc<Mutex<f16c50::AvionicsState>>),
+    F_16C_50(f16c50::Gui),
     FA_18C_hornet,
     M_2000C,
     Mi_24P,
@@ -386,7 +386,7 @@ pub fn lookup_tree<'a>(
     Some(tree.get(cur).unwrap().data())
 }
 
-#[trace(logging, disable(tree))]
+#[trace(logging, disable())]
 pub fn get_avionics_indication(
     to_export: &TaskSender<Lua>,
     device: i32,
