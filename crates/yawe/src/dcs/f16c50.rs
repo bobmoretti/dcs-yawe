@@ -1169,34 +1169,51 @@ fn make_slot_row(row: &mut egui_extras::TableRow, cmds_program_slot: &CmdsProgra
 
 #[derive(Default, Debug, Clone)]
 struct EditTracker {
-    edited: bool,
+    pub edited: bool,
 }
 
 impl EditTracker {
     fn update(&mut self, updated: bool) {
         self.edited = self.edited || updated;
     }
-    fn add_text_parser<T, F>(&mut self, ui: &mut egui::Ui, txt: &mut String, val: &mut T, parser: F)
-    where
+    fn add_text_parser<T, F>(
+        &mut self,
+        ui: &mut egui::Ui,
+        txt: &mut String,
+        val: &T,
+        updated_val: &mut T,
+        parser: F,
+    ) where
         F: FnOnce(&String) -> T,
         T: FromStr + Display,
     {
         ui.label(format!("{}", val));
         let edited = ui.text_edit_singleline(txt).changed();
         self.update(edited);
-        *val = parser(txt);
+        *updated_val = parser(txt);
+    }
+
+    fn add_bool(&mut self, ui: &mut egui::Ui, val: &bool, updated_val: &mut bool) {
+        ui.label(bool_to_on_off(*val));
+        self.update(ui.checkbox(updated_val, "").changed());
     }
 }
 
 #[derive(Default, Debug, Clone)]
 pub struct Gui {
     avionics: Arc<Mutex<AvionicsState>>,
+    avionics_updated: AvionicsState,
     edit_tracker: EditTracker,
     flare_bingo_quantity_raw: String,
     chaff_bingo_quantity_raw: String,
 }
 
 impl Gui {
+    fn update_text_fields(&mut self) {
+        self.flare_bingo_quantity_raw = self.avionics_updated.cmds.bingo.flare.to_string();
+        self.chaff_bingo_quantity_raw = self.avionics_updated.cmds.bingo.chaff.to_string();
+    }
+
     pub fn make_widget(
         &mut self,
         ui: &mut egui::Ui,
@@ -1206,17 +1223,31 @@ impl Gui {
             let s = self.avionics.clone();
             let text_height = egui::TextStyle::Body.resolve(ui.style()).size;
 
-            if ui.button("Read").clicked() {
-                to_app.send(move |(to_gamegui, to_export)| {
-                    let result = read_cmds(&to_gamegui, &to_export);
-                    *s.clone().lock().unwrap() = result.unwrap();
-                });
-            }
+            ui.horizontal(|ui| {
+                if ui.button("Read").clicked() {
+                    let _ = to_app
+                        .send(move |(to_gamegui, to_export)| {
+                            let result = read_cmds(&to_gamegui, &to_export);
+                            *s.clone().lock().unwrap() = result.unwrap();
+                        })
+                        .wait();
+                    self.avionics_updated = self.avionics.lock().unwrap().clone();
+                    self.update_text_fields();
+                }
+
+                let apply_button =
+                    ui.add_enabled(self.edit_tracker.edited, egui::Button::new("Apply"));
+                if apply_button.clicked() {
+                    self.edit_tracker.edited = false;
+                    *self.avionics.lock().unwrap() = self.avionics_updated.clone();
+                }
+            });
 
             let strong_heading =
                 |ui: &mut egui::Ui, txt| ui.heading(egui::RichText::new(txt).strong());
 
-            let cmds = &mut self.avionics.lock().unwrap().cmds;
+            let cmds = &self.avionics.lock().unwrap().cmds;
+            let cmds_updated = &mut self.avionics_updated.cmds;
 
             let parse_bingo_quantity = |raw: &String| {
                 let val: i8 = raw.parse().unwrap_or(0);
@@ -1232,7 +1263,8 @@ impl Gui {
                 self.edit_tracker.add_text_parser(
                     ui,
                     &mut self.flare_bingo_quantity_raw,
-                    &mut cmds.bingo.flare,
+                    &cmds.bingo.flare,
+                    &mut cmds_updated.bingo.flare,
                     parse_bingo_quantity,
                 );
                 ui.end_row();
@@ -1241,7 +1273,8 @@ impl Gui {
                 self.edit_tracker.add_text_parser(
                     ui,
                     &mut self.chaff_bingo_quantity_raw,
-                    &mut cmds.bingo.chaff,
+                    &cmds.bingo.chaff,
+                    &mut cmds_updated.bingo.chaff,
                     parse_bingo_quantity,
                 );
                 ui.end_row();
@@ -1250,18 +1283,22 @@ impl Gui {
                 ui.end_row();
 
                 ui.label("Feedback");
-                ui.label(bool_to_on_off(cmds.bingo.feedback));
-                ui.checkbox(&mut cmds.bingo.feedback, "");
+                self.edit_tracker.add_bool(
+                    ui,
+                    &cmds.bingo.feedback,
+                    &mut cmds_updated.bingo.feedback,
+                );
                 ui.end_row();
 
                 ui.label("Request countermeasures");
-                ui.label(bool_to_on_off(cmds.bingo.reqctr));
-                ui.checkbox(&mut cmds.bingo.reqctr, "");
+                self.edit_tracker
+                    .add_bool(ui, &cmds.bingo.reqctr, &mut cmds_updated.bingo.reqctr);
                 ui.end_row();
 
                 ui.label("Bingo");
-                ui.label(bool_to_on_off(cmds.bingo.bingo));
-                ui.checkbox(&mut cmds.bingo.bingo, "");
+                self.edit_tracker
+                    .add_bool(ui, &cmds.bingo.bingo, &mut cmds_updated.bingo.bingo);
+
                 ui.end_row();
             });
 
