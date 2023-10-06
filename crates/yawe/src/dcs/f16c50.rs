@@ -1202,119 +1202,118 @@ impl Gui {
         ui: &mut egui::Ui,
         to_app: &TaskSender<(TaskSender<Lua>, TaskSender<Lua>)>,
     ) {
+        let countermeasures_section = move |ui: &mut egui::Ui| {
+            let s = self.avionics.clone();
+            let text_height = egui::TextStyle::Body.resolve(ui.style()).size;
+
+            if ui.button("Read").clicked() {
+                to_app.send(move |(to_gamegui, to_export)| {
+                    let result = read_cmds(&to_gamegui, &to_export);
+                    *s.clone().lock().unwrap() = result.unwrap();
+                });
+            }
+
+            let strong_heading =
+                |ui: &mut egui::Ui, txt| ui.heading(egui::RichText::new(txt).strong());
+
+            let cmds = &mut self.avionics.lock().unwrap().cmds;
+
+            let parse_bingo_quantity = |raw: &String| {
+                let val: i8 = raw.parse().unwrap_or(0);
+                val.clamp(0, 99)
+            };
+
+            ui.separator();
+            let grid = egui::Grid::new("cmds_bingo_grid");
+            let grid = grid.num_columns(3).striped(true).show(ui, |ui| {
+                ui.strong("Bingo quantities");
+                ui.end_row();
+                ui.label("Flare bingo quantity");
+                self.edit_tracker.add_text_parser(
+                    ui,
+                    &mut self.flare_bingo_quantity_raw,
+                    &mut cmds.bingo.flare,
+                    parse_bingo_quantity,
+                );
+                ui.end_row();
+
+                ui.label("Chaff bingo quantity");
+                self.edit_tracker.add_text_parser(
+                    ui,
+                    &mut self.chaff_bingo_quantity_raw,
+                    &mut cmds.bingo.chaff,
+                    parse_bingo_quantity,
+                );
+                ui.end_row();
+
+                ui.strong("Audible warnings");
+                ui.end_row();
+
+                ui.label("Feedback");
+                ui.label(bool_to_on_off(cmds.bingo.feedback));
+                ui.checkbox(&mut cmds.bingo.feedback, "");
+                ui.end_row();
+
+                ui.label("Request countermeasures");
+                ui.label(bool_to_on_off(cmds.bingo.reqctr));
+                ui.checkbox(&mut cmds.bingo.reqctr, "");
+                ui.end_row();
+
+                ui.label("Bingo");
+                ui.label(bool_to_on_off(cmds.bingo.bingo));
+                ui.checkbox(&mut cmds.bingo.bingo, "");
+                ui.end_row();
+            });
+
+            ui.separator();
+            strong_heading(ui, "Programs");
+            use egui_extras::{Column, TableBuilder};
+
+            let table = TableBuilder::new(ui)
+                .striped(true)
+                .column(Column::auto())
+                .column(Column::auto())
+                .column(Column::auto())
+                .column(Column::auto())
+                .column(Column::auto());
+
+            table
+                .header(text_height * 1.1, |mut header| {
+                    header.col(|ui| {
+                        ui.strong("");
+                    });
+                    header.col(|ui| {
+                        ui.strong("Burst quantity");
+                    });
+                    header.col(|ui| {
+                        ui.strong("Burst interval");
+                    });
+                    header.col(|ui| {
+                        ui.strong("Sequence quantity");
+                    });
+                    header.col(|ui| {
+                        ui.strong("Sequence interval");
+                    });
+                })
+                .body(|mut body| {
+                    for idx in 0..6 {
+                        body.row(text_height, |mut row| {
+                            row.col(|ui| {
+                                ui.strong(format!("Program {} chaff", idx + 1));
+                            });
+                            make_slot_row(&mut row, &cmds.programs[idx].chaff);
+                        });
+                        body.row(18.0, |mut row| {
+                            row.col(|ui| {
+                                ui.strong(format!("Program {} flare", idx + 1));
+                            });
+                            make_slot_row(&mut row, &cmds.programs[idx].flare);
+                        });
+                    }
+                })
+        };
         egui::CollapsingHeader::new("Countermeasures")
             .default_open(false)
-            .show(ui, move |ui| {
-                let s = self.avionics.clone();
-                let text_height = egui::TextStyle::Body.resolve(ui.style()).size;
-
-                if ui.button("Read").clicked() {
-                    to_app.send(move |(to_gamegui, to_export)| {
-                        let result = read_cmds(&to_gamegui, &to_export);
-                        *s.clone().lock().unwrap() = result.unwrap();
-                    });
-                }
-
-                let strong_heading =
-                    |ui: &mut egui::Ui, txt| ui.heading(egui::RichText::new(txt).strong());
-
-                let cmds = &mut self.avionics.lock().unwrap().cmds;
-
-                let parse_bingo_quantity = |raw: &String| {
-                    let val: i8 = raw.parse().unwrap_or(0);
-                    val.clamp(0, 99)
-                };
-
-                ui.separator();
-                let grid = egui::Grid::new("cmds_bingo_grid")
-                    .num_columns(3)
-                    .striped(true)
-                    .show(ui, |ui| {
-                        ui.strong("Bingo quantities");
-                        ui.end_row();
-                        ui.label("Flare bingo quantity");
-                        self.edit_tracker.add_text_parser(
-                            ui,
-                            &mut self.flare_bingo_quantity_raw,
-                            &mut cmds.bingo.flare,
-                            parse_bingo_quantity,
-                        );
-                        ui.end_row();
-
-                        ui.label("Chaff bingo quantity");
-                        self.edit_tracker.add_text_parser(
-                            ui,
-                            &mut self.chaff_bingo_quantity_raw,
-                            &mut cmds.bingo.chaff,
-                            parse_bingo_quantity,
-                        );
-                        ui.end_row();
-
-                        ui.strong("Audible warnings");
-                        ui.end_row();
-
-                        ui.label("Feedback");
-                        ui.label(bool_to_on_off(cmds.bingo.feedback));
-                        ui.checkbox(&mut cmds.bingo.feedback, "");
-                        ui.end_row();
-
-                        ui.label("Request countermeasures");
-                        ui.label(bool_to_on_off(cmds.bingo.reqctr));
-                        ui.checkbox(&mut cmds.bingo.reqctr, "");
-                        ui.end_row();
-
-                        ui.label("Bingo");
-                        ui.label(bool_to_on_off(cmds.bingo.bingo));
-                        ui.checkbox(&mut cmds.bingo.bingo, "");
-                        ui.end_row();
-                    });
-
-                ui.separator();
-                strong_heading(ui, "Programs");
-                use egui_extras::{Column, TableBuilder};
-
-                let table = TableBuilder::new(ui)
-                    .striped(true)
-                    .column(Column::auto())
-                    .column(Column::auto())
-                    .column(Column::auto())
-                    .column(Column::auto())
-                    .column(Column::auto());
-
-                table
-                    .header(text_height * 1.1, |mut header| {
-                        header.col(|ui| {
-                            ui.strong("");
-                        });
-                        header.col(|ui| {
-                            ui.strong("Burst quantity");
-                        });
-                        header.col(|ui| {
-                            ui.strong("Burst interval");
-                        });
-                        header.col(|ui| {
-                            ui.strong("Sequence quantity");
-                        });
-                        header.col(|ui| {
-                            ui.strong("Sequence interval");
-                        });
-                    })
-                    .body(|mut body| {
-                        for idx in 0..6 {
-                            body.row(text_height, |mut row| {
-                                row.col(|ui| {
-                                    ui.strong(format!("Program {} chaff", idx + 1));
-                                });
-                                make_slot_row(&mut row, &cmds.programs[idx].chaff);
-                            });
-                            body.row(18.0, |mut row| {
-                                row.col(|ui| {
-                                    ui.strong(format!("Program {} flare", idx + 1));
-                                });
-                                make_slot_row(&mut row, &cmds.programs[idx].flare);
-                            });
-                        }
-                    })
-            });
+            .show(ui, countermeasures_section);
     }
 }
