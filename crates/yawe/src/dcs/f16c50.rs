@@ -6,6 +6,7 @@ use crate::dcs::{
     self, list_indication, retry_default, set_lockon_command, LockonCommand, SwitchInfo,
 };
 use egui_backend::egui;
+use egui_extras::TableRow;
 use mlua::prelude::LuaResult;
 use mlua::Lua;
 use offload::TaskSender;
@@ -1153,18 +1154,20 @@ fn bool_to_on_off(state: bool) -> &'static str {
     }
 }
 
-fn add_quantity<T>(ui: &mut egui::Ui, quantity: T, s: &mut String)
+fn add_quantity<T>(ui: &mut TableRow, quantity: T, s: &mut String)
 where
     T: std::string::ToString,
 {
-    ui.horizontal(|ui| {
-        ui.label(quantity.to_string());
-        ui.text_edit_singleline(s);
+    ui.col(|col| {
+        col.horizontal(|ui| {
+            ui.label(quantity.to_string());
+            ui.text_edit_singleline(s);
+        });
     });
 }
 
 fn make_slot_row(
-    row: &mut egui::Ui,
+    row: &mut TableRow,
     cmds_program_slot: &CmdsProgramSlot,
     texts: &mut CmdsProgramText,
 ) {
@@ -1363,13 +1366,21 @@ impl Gui {
                             row.col(|ui| {
                                 ui.strong(format!("Program {} chaff", idx + 1));
                             });
-                            make_slot_row(&mut row, &cmds.programs[idx].chaff);
+                            make_slot_row(
+                                &mut row,
+                                &cmds.programs[idx].chaff,
+                                &mut self.flare_program_text_inputs[idx],
+                            );
                         });
                         body.row(18.0, |mut row| {
                             row.col(|ui| {
                                 ui.strong(format!("Program {} flare", idx + 1));
                             });
-                            make_slot_row(&mut row, &cmds.programs[idx].flare);
+                            make_slot_row(
+                                &mut row,
+                                &cmds.programs[idx].flare,
+                                &mut self.chaff_program_text_inputs[idx],
+                            );
                         });
                     }
                 })
