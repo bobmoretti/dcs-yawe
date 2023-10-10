@@ -8,7 +8,6 @@ use mlua::Lua;
 use offload::TaskSender;
 use slab_tree::{NodeId, NodeRef, Tree};
 use std::str::FromStr;
-use std::sync::{Arc, Mutex};
 use trace::trace;
 trace::init_depth_var!();
 
