@@ -420,6 +420,30 @@ pub fn get_avionics_indication(
     Some(parse_indication(&s))
 }
 
+pub fn retry_default<T, F>(f: F) -> Option<T>
+where
+    F: FnOnce() -> Option<T> + Copy,
+{
+    retry_until(f, std::time::Duration::from_secs(2))
+}
+
+pub fn retry_until<T, F>(f: F, timeout: std::time::Duration) -> Option<T>
+where
+    F: FnOnce() -> Option<T> + Copy,
+{
+    let start = std::time::Instant::now();
+    loop {
+        let x = f();
+        if x.is_some() {
+            return x;
+        }
+        let elapsed = std::time::Instant::now() - start;
+        if elapsed > timeout {
+            return None;
+        }
+    }
+}
+
 #[trace(logging)]
 pub fn get_avionics_value(
     to_export: &TaskSender<Lua>,

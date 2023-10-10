@@ -2,7 +2,9 @@
 #![allow(unused_variables)]
 
 use crate::app::FsmMessage;
-use crate::dcs::{self, list_indication, set_lockon_command, LockonCommand, SwitchInfo};
+use crate::dcs::{
+    self, list_indication, retry_default, set_lockon_command, LockonCommand, SwitchInfo,
+};
 use egui_backend::egui;
 use mlua::prelude::LuaResult;
 use mlua::Lua;
@@ -661,7 +663,7 @@ fn read_cmds(to_gamegui: &TaskSender<Lua>, to_export: &TaskSender<Lua>) -> Optio
     icp_number(to_gamegui, 7);
     while !is_on_cmds_bingo(to_export) {}
     let mut avionics = AvionicsState::default();
-    avionics.cmds.bingo = read_cmds_bingo_page(to_export)?;
+    avionics.cmds.bingo = retry_default(|| read_cmds_bingo_page(to_export))?;
     ded_sequence(to_gamegui);
     wait_frame(to_gamegui);
     wait_on_cmds_program(to_export);
@@ -1151,20 +1153,33 @@ fn bool_to_on_off(state: bool) -> &'static str {
     }
 }
 
-fn add_quantity<T>(row: &mut egui_extras::TableRow, quantity: T)
+fn add_quantity<T>(ui: &mut egui::Ui, quantity: T, s: &mut String)
 where
     T: std::string::ToString,
 {
-    row.col(|ui| {
+    ui.horizontal(|ui| {
         ui.label(quantity.to_string());
+        ui.text_edit_singleline(s);
     });
 }
 
-fn make_slot_row(row: &mut egui_extras::TableRow, cmds_program_slot: &CmdsProgramSlot) {
-    add_quantity(row, cmds_program_slot.burst_quantity);
-    add_quantity(row, cmds_program_slot.burst_interval);
-    add_quantity(row, cmds_program_slot.sequence_quantity);
-    add_quantity(row, cmds_program_slot.sequence_interval);
+fn make_slot_row(
+    row: &mut egui::Ui,
+    cmds_program_slot: &CmdsProgramSlot,
+    texts: &mut CmdsProgramText,
+) {
+    add_quantity(row, cmds_program_slot.burst_quantity, &mut texts.bq_field);
+    add_quantity(row, cmds_program_slot.burst_interval, &mut texts.bi_field);
+    add_quantity(
+        row,
+        cmds_program_slot.sequence_quantity,
+        &mut texts.sq_field,
+    );
+    add_quantity(
+        row,
+        cmds_program_slot.sequence_interval,
+        &mut texts.si_field,
+    );
 }
 
 #[derive(Default, Debug, Clone)]
@@ -1199,6 +1214,14 @@ impl EditTracker {
     }
 }
 
+#[derive(Default, Debug, Clone, PartialEq)]
+struct CmdsProgramText {
+    bq_field: String,
+    bi_field: String,
+    sq_field: String,
+    si_field: String,
+}
+
 #[derive(Default, Debug, Clone)]
 pub struct Gui {
     avionics: Arc<Mutex<AvionicsState>>,
@@ -1206,6 +1229,8 @@ pub struct Gui {
     edit_tracker: EditTracker,
     flare_bingo_quantity_raw: String,
     chaff_bingo_quantity_raw: String,
+    flare_program_text_inputs: [CmdsProgramText; 6],
+    chaff_program_text_inputs: [CmdsProgramText; 6],
 }
 
 impl Gui {
